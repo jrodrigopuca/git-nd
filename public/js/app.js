@@ -224,7 +224,7 @@ function renderChanges(status) {
       el('span', { class: `st st-${st}` }, label),
       el('span', {
         class: 'fname', title: f.filepath,
-        onclick: () => f.conflicted ? openConflictEditor(f.filepath) : showDiff(f.filepath),
+        onclick: () => f.conflicted ? openConflictEditor(f.filepath) : showWorkdirDiff(f.filepath, isStaged),
       }, f.filepath),
       el('span', { class: 'actions' },
         isStaged
@@ -723,6 +723,56 @@ async function saveFile() {
 
 $('file-editor').addEventListener('input', () => setDirty(true));
 $('btn-save-file').addEventListener('click', saveFile);
+
+/** Working-copy diff split into hunks with stage/unstage/discard per hunk. */
+async function showWorkdirDiff(path, staged) {
+  const target = staged ? 'staged' : 'unstaged';
+  const data = await withUi(api.get(`/api/repo/hunks?file=${encodeURIComponent(path)}&target=${target}`));
+  if (!data) return;
+  $('diff-path').textContent = `${path} — ${staged ? 'staged changes (index vs HEAD)' : 'unstaged changes (working copy vs index)'}`;
+
+  const blocks = data.hunks.map((hk) => {
+    const actions = staged
+      ? [el('button', {
+          class: 'btn btn-xs', onclick: () => hunkOp('unstage', path, hk.index, staged),
+        }, '⊖ Unstage hunk')]
+      : [
+          el('button', {
+            class: 'btn btn-xs btn-primary', onclick: () => hunkOp('stage', path, hk.index, staged),
+          }, '⊕ Stage hunk'),
+          el('button', {
+            class: 'btn btn-xs', title: 'Revert this change in your working file',
+            onclick: async () => {
+              if (await confirmModal('Discard hunk', 'This change will be permanently removed from your working file. Are you sure?')) {
+                hunkOp('discard', path, hk.index, staged);
+              }
+            },
+          }, '↺ Discard'),
+        ];
+    return el('div', { class: 'hunk-block' },
+      el('div', { class: 'hunk-head' },
+        el('code', {}, hk.header),
+        el('span', { class: 'spacer' }),
+        ...actions),
+      renderDiff(hk.rows),
+    );
+  });
+
+  setChildren($('diff-view'),
+    blocks.length
+      ? el('div', { class: 'hunk-wrap' }, blocks)
+      : el('p', { class: 'muted pad' }, staged ? 'Nothing staged for this file.' : 'No unstaged changes for this file.'),
+  );
+  showTab('diff');
+}
+
+async function hunkOp(op, path, index, staged) {
+  const labels = { stage: 'Hunk staged ⊕', unstage: 'Hunk unstaged ⊖', discard: 'Hunk discarded ↺' };
+  const r = await withUi(api.post(`/api/repo/hunks/${op}`, { path, hunks: [index] }), { success: labels[op] });
+  if (r === null) return;
+  await refreshAll();
+  showWorkdirDiff(path, staged); // re-render remaining hunks
+}
 
 async function showDiff(path, oid, base) {
   const q = (oid ? `&oid=${oid}` : '') + (base ? `&base=${base}` : '');

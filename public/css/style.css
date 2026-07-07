@@ -224,6 +224,20 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 .mv-file-status.ok { color: var(--green); }
 .mv-actions { display: flex; gap: 10px; margin-top: 22px; }
 
+/* ---------- hunk staging ---------- */
+.hunk-wrap { padding: 12px 16px; }
+.hunk-block {
+  border: 1px solid var(--border); border-radius: 10px;
+  margin-bottom: 14px; overflow: hidden;
+}
+.hunk-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+}
+.hunk-head code { font-size: 11.5px; color: var(--muted); }
+.hunk-head .spacer { flex: 1; }
+
 /* ---------- visual conflict editor ---------- */
 .cf-wrap { flex: 1; overflow: auto; padding: 12px 16px; }
 .cf-ctx {

@@ -812,6 +812,155 @@ function sideBySideRows(oldText, newText) {
   return rows;
 }
 
+/* --------------------------------------------------------- hunk staging --- */
+
+/** Text of the file as currently staged (index), or null if not in the index. */
+async function indexBlobText(dir, rel) {
+  let oid = null;
+  await git.walk({
+    fs, dir, trees: [git.STAGE()],
+    map: async (fp, [entry]) => {
+      if (fp === rel && entry && (await entry.type()) === 'blob') {
+        oid = await entry.oid();
+      }
+      return true;
+    },
+  });
+  if (!oid) return null;
+  const { blob } = await git.readBlob({ fs, dir, oid });
+  return new TextDecoder().decode(blob);
+}
+
+const assertText = (text, rel) => {
+  if (text.includes('\0')) throw new AppError(`${rel} is binary: stage the whole file instead`, 422);
+};
+
+/** Unified-diff hunk lines → aligned side-by-side rows with line numbers. */
+function hunkRows(h) {
+  let oldLn = h.oldStart;
+  let newLn = h.newStart;
+  const rows = [];
+  let removed = [];
+  const flush = () => {
+    for (const text of removed) rows.push({ left: { ln: oldLn++, text, type: 'removed' }, right: null });
+    removed = [];
+  };
+  for (const line of h.lines) {
+    const tag = line[0];
+    const text = line.slice(1);
+    if (tag === '-') removed.push(text);
+    else if (tag === '+') {
+      if (removed.length) {
+        rows.push({ left: { ln: oldLn++, text: removed.shift(), type: 'removed' }, right: { ln: newLn++, text, type: 'added' } });
+      } else {
+        rows.push({ left: null, right: { ln: newLn++, text, type: 'added' } });
+      }
+    } else {
+      flush();
+      rows.push({ left: { ln: oldLn++, text, type: 'context' }, right: { ln: newLn++, text, type: 'context' } });
+    }
+  }
+  flush();
+  return rows;
+}
+
+/** Apply the selected hunks (by index) onto oldText; unselected hunks are skipped. */
+function applyHunks(oldText, hunks, selected) {
+  const oldLines = oldText.split('\n');
+  const out = [];
+  let cursor = 0;
+  hunks.forEach((h, i) => {
+    // Pure-insertion hunks (oldLines=0) anchor AFTER old line oldStart.
+    const start = h.oldLines === 0 ? h.oldStart : h.oldStart - 1;
+    out.push(...oldLines.slice(cursor, start));
+    cursor = start;
+    if (!selected.includes(i)) return; // leave the old content untouched
+    for (const line of h.lines) {
+      const tag = line[0];
+      if (tag === '+') out.push(line.slice(1));
+      else if (tag === '-') cursor++;
+      else { out.push(line.slice(1)); cursor++; }
+    }
+  });
+  out.push(...oldLines.slice(cursor));
+  return out.join('\n');
+}
+
+const reverseHunk = (h) => ({
+  oldStart: h.newStart, oldLines: h.newLines,
+  newStart: h.oldStart, newLines: h.oldLines,
+  lines: h.lines.map((l) => (l[0] === '+' ? `-${l.slice(1)}` : l[0] === '-' ? `+${l.slice(1)}` : l)),
+});
+
+/** old/new texts for a diff target: unstaged = index→workdir, staged = HEAD→index. */
+async function hunkTexts(dir, rel, abs, target) {
+  if (target === 'staged') {
+    const oldText = await headContent(dir, rel);
+    const newText = (await indexBlobText(dir, rel)) ?? '';
+    return { oldText, newText };
+  }
+  const oldText = (await indexBlobText(dir, rel)) ?? '';
+  const newText = fs.existsSync(abs) ? await fsp.readFile(abs, 'utf8') : '';
+  return { oldText, newText };
+}
+
+function computeHunks(oldText, newText, rel) {
+  assertText(oldText, rel);
+  assertText(newText, rel);
+  return Diff.structuredPatch(rel, rel, oldText, newText, '', '', { context: 3 }).hunks;
+}
+
+export async function fileHunks(filepath, target = 'unstaged') {
+  const dir = repoState.requireRepo();
+  const rel = repoState.relPath(filepath);
+  const abs = repoState.safePath(filepath);
+  const { oldText, newText } = await hunkTexts(dir, rel, abs, target);
+  const hunks = computeHunks(oldText, newText, rel);
+  return {
+    filepath: rel,
+    target,
+    hunks: hunks.map((h, i) => ({
+      index: i,
+      header: `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@`,
+      rows: hunkRows(h),
+    })),
+  };
+}
+
+async function writeIndex(dir, rel, abs, text) {
+  if (text === '' && !fs.existsSync(abs)) {
+    await git.remove({ fs, dir, filepath: rel });
+    return;
+  }
+  const oid = await git.writeBlob({ fs, dir, blob: new TextEncoder().encode(text) });
+  await git.updateIndex({ fs, dir, filepath: rel, oid, add: true });
+}
+
+/** op: stage (index += hunks), unstage (index -= hunks), discard (workdir -= hunks). */
+export async function applyHunkOp(filepath, indexes, op) {
+  const dir = repoState.requireRepo();
+  const rel = repoState.relPath(filepath);
+  const abs = repoState.safePath(filepath);
+  const selected = (indexes || []).map(Number);
+  if (selected.length === 0) throw new AppError('No hunks selected', 400);
+
+  if (op === 'stage') {
+    const { oldText, newText } = await hunkTexts(dir, rel, abs, 'unstaged');
+    const hunks = computeHunks(oldText, newText, rel);
+    await writeIndex(dir, rel, abs, applyHunks(oldText, hunks, selected));
+  } else if (op === 'unstage') {
+    const { oldText, newText } = await hunkTexts(dir, rel, abs, 'staged');
+    const reversed = computeHunks(oldText, newText, rel).map(reverseHunk);
+    await writeIndex(dir, rel, abs, applyHunks(newText, reversed, selected));
+  } else if (op === 'discard') {
+    const { oldText, newText } = await hunkTexts(dir, rel, abs, 'unstaged');
+    const reversed = computeHunks(oldText, newText, rel).map(reverseHunk);
+    await fsp.writeFile(abs, applyHunks(newText, reversed, selected), 'utf8');
+  } else {
+    throw new AppError(`Unknown hunk operation: ${op}`, 400);
+  }
+}
+
 /* ---------------------------------------------------------------- stash --- */
 
 export async function stash(op, message) {

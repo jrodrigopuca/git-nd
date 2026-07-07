@@ -69,6 +69,13 @@ repoRouter.post('/api/repo/discard', h((req) => gitSvc.discard(req.body.path)));
 repoRouter.post('/api/repo/stage-all', h(() => gitSvc.stageAll()));
 repoRouter.post('/api/repo/unstage-all', h(() => gitSvc.unstageAll()));
 
+/* ---- hunk-level staging ---- */
+repoRouter.get('/api/repo/hunks', h((req) => gitSvc.fileHunks(req.query.file, req.query.target)));
+repoRouter.post('/api/repo/hunks/:op', h(async (req) => {
+  await gitSvc.applyHunkOp(req.body.path, req.body.hunks, req.params.op);
+  broadcast('file-changed', { path: req.body.path });
+}));
+
 /* ---- commit / history ---- */
 repoRouter.post('/api/repo/commit', h(async (req) => {
   const result = await gitSvc.commit(req.body);

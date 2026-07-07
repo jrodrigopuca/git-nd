@@ -26,6 +26,7 @@ The app is organized into three views (activity bar on the left, IDE-style):
 - **Tree view** with lazy loading, per-filetype icons, status indicators (M/U/D/!) and drag & drop to add files
 - **File editor**: open any file from the tree and edit it in place (`Ctrl+S` to save)
 - **Changes**: stage / unstage / discard per file, with side-by-side diff
+- **Hunk staging**: click a changed file and stage, unstage, or discard each hunk independently — build atomic commits by picking exactly the changes you want (workdir vs index and index vs HEAD views)
 - **Commit** with message and editable author (`Name <email>`)
 - **Push / Pull** with token authentication (OAuth or PAT), private repos included
 - **Pull with rebase**: replay your commits on top of the remote for linear history (mode picker next to Pull; aborts safely on conflicts and suggests merge)

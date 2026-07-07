@@ -11,7 +11,7 @@ Status: `[ ]` pending · `[x]` done.
 ## Recommended order
 
 1. ~~CSRF / localhost hardening~~ ✅ (T1.1)
-2. Hunk & line staging (T1.2)
+2. ~~Hunk staging~~ ✅ (T1.2 — per-line checkboxes still pending)
 3. File watcher auto-refresh (T1.4)
 4. Hybrid native-git backend → SSH + performance (T1.3)
 5. Missing history operations: revert, amend, cherry-pick, tags (T1.5)
@@ -36,17 +36,21 @@ carrying a cross-site `Origin` header (CSRF). WebSocket upgrades validate
 `Origin` the same way. Non-browser clients (curl, scripts) send no `Origin`
 and keep working.
 
-### T1.2 `[ ]` Hunk & line-level staging — **M**
+### T1.2 `[x]` Hunk & line-level staging — **M** *(hunk level shipped)*
 
 **Problem**: staging is whole-file only. Atomic commits require picking
 *these 3 lines yes, those 2 no* — Sourcetree's killer feature.
 
-**Sketch**: the diff endpoint already computes aligned rows; group them into
-hunks server-side (`diff.structuredPatch`), render each hunk with a
-"Stage hunk" button (and per-line checkboxes later). To apply: read HEAD blob,
-apply selected hunk(s) to the *index copy* only — write the patched content to
-the index with `git.updateIndex`/manual blob write, leaving the workdir
-untouched. Inverse operation for unstage.
+**Shipped**: `GET /api/repo/hunks?file=&target=unstaged|staged` computes hunks
+(`diff.structuredPatch`, context 3) over the correct pairs — index→workdir for
+staging, HEAD→index for unstaging. `POST /api/repo/hunks/stage|unstage|discard`
+applies/reverse-applies selected hunks and writes the result to the index via
+`writeBlob` + `updateIndex` (workdir untouched); discard patches the working
+file (with confirm). Clicking a changed file opens the hunk view with per-hunk
+Stage/Unstage/Discard buttons. Binary files are rejected with a clear message.
+
+**Remaining**: per-line checkboxes inside a hunk (split hunk), word-level
+highlight (see T2.3).
 
 ### T1.3 `[ ]` Hybrid native-git backend (SSH + performance) — **L**
 
