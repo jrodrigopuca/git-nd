@@ -55,6 +55,20 @@ export class GitHubProvider {
     return { url: pr.html_url, number: pr.number };
   }
 
+  async listPullRequests(token, { repo }) {
+    const prs = await gh(token, `/repos/${repo}/pulls?state=open&per_page=50`);
+    return prs.map((p) => ({
+      number: p.number,
+      title: p.title,
+      author: p.user?.login,
+      sourceBranch: p.head?.ref,
+      targetBranch: p.base?.ref,
+      url: p.html_url,
+      createdAt: p.created_at,
+      draft: p.draft,
+    }));
+  }
+
   async listIssues(token, { repo }) {
     const issues = await gh(token, `/repos/${repo}/issues?state=open&per_page=50`);
     return issues

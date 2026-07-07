@@ -1,8 +1,9 @@
 import { api, withUi, onEvent } from './api.js';
-import { el, toast, openModal, closeModal, confirmModal, fileIcon } from './ui.js';
+import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren } from './ui.js';
 import { refreshTree, setStatusMap, setOpenFileHandler, initTreeDnD } from './tree.js';
 import { renderDiff } from './diff.js';
 import { renderGraph } from './graph.js';
+import { parseConflicts, assembleConflicts, renderConflictUI } from './conflict.js';
 
 const $ = (id) => document.getElementById(id);
 let repo = null;       // current repo info
@@ -325,6 +326,9 @@ async function doPull() {
   if (!r) return;
   if (r.conflicts?.length) {
     toast(`Conflicts in ${r.conflicts.length} file(s): resolve them to complete the merge`, 'error', 6000);
+    await refreshAll();
+    showTab('merge');
+    return;
   } else if (r.upToDate) {
     toast(r.note || 'Already up to date ✔', 'success');
   } else if (r.rebased) {
@@ -466,9 +470,13 @@ async function mergeBranch(theirRef) {
   const author = parseAuthor($('commit-author').value.trim());
   const r = await withUi(api.post('/api/repo/merge', { theirRef, author }), { loading: `Merging ${theirRef}…` });
   if (!r) return;
-  if (r.conflicts?.length) toast(`Conflicts in ${r.conflicts.length} file(s)`, 'error', 6000);
-  else toast('Merge completed ✔', 'success');
-  refreshAll();
+  await refreshAll();
+  if (r.conflicts?.length) {
+    toast(`Conflicts in ${r.conflicts.length} file(s)`, 'error', 6000);
+    showTab('merge');
+  } else {
+    toast('Merge completed ✔', 'success');
+  }
 }
 
 $('btn-new-branch').addEventListener('click', async () => {
@@ -497,74 +505,169 @@ $('btn-branch').addEventListener('click', async () => {
 /* ============================================================ conflicts === */
 
 function renderMergeBanner(merge) {
-  const banner = $('merge-banner');
-  banner.hidden = !merge;
-  if (!merge) return;
-  $('merge-files').replaceChildren(...merge.files.map((f) => {
-    const resolved = merge.resolved.includes(f);
-    return el('div', {
-      class: `conflict-file ${resolved ? 'resolved' : ''}`,
-      onclick: () => !resolved && openConflictEditor(f),
-    }, `${resolved ? '✔' : '⚠'} ${f}`);
-  }));
-}
-
-let conflictFile = null;
-
-async function openConflictEditor(path) {
-  const file = await withUi(api.get(`/api/repo/file?path=${encodeURIComponent(path)}`));
-  if (!file) return;
-  conflictFile = path;
-  $('conflict-path').textContent = path;
-  $('conflict-editor').value = file.content || '';
-  showTab('conflict');
-}
-
-function pickSide(text, side) {
-  const out = [];
-  let state = 'normal';
-  for (const line of text.split('\n')) {
-    if (line.startsWith('<<<<<<<')) state = 'ours';
-    else if (line.startsWith('=======') && state === 'ours') state = 'theirs';
-    else if (line.startsWith('>>>>>>>')) state = 'normal';
-    else if (state === 'normal' || state === side) out.push(line);
+  $('merge-banner').hidden = !merge;
+  $('tab-btn-merge').hidden = !merge;
+  if (merge) {
+    renderMergeView();
+  } else if (activeTab() === 'merge') {
+    showTab('graph'); // merge finished/aborted while the view was open
   }
-  return out.join('\n');
 }
 
-$('c-ours').addEventListener('click', () => {
-  $('conflict-editor').value = pickSide($('conflict-editor').value, 'ours');
-});
-$('c-theirs').addEventListener('click', () => {
-  $('conflict-editor').value = pickSide($('conflict-editor').value, 'theirs');
-});
-$('c-save').addEventListener('click', async () => {
-  if (!conflictFile) return;
-  const content = $('conflict-editor').value;
-  if (/^(<{7}|={7}|>{7})/m.test(content)) {
-    return toast('There are still conflict markers left (<<<<<<< ======= >>>>>>>)', 'error');
-  }
-  const saved = await withUi(api.post('/api/repo/file', { path: conflictFile, content }));
-  if (saved === null) return;
-  const staged = await withUi(api.post('/api/repo/stage', { path: conflictFile }), { success: `Resolved: ${conflictFile}` });
-  if (staged !== null) refreshAll();
-});
-
-$('btn-merge-done').addEventListener('click', async () => {
+async function completeMergeAction() {
   const author = parseAuthor($('commit-author').value.trim());
   const r = await withUi(
     api.post('/api/repo/commit', { message: $('commit-msg').value.trim() || undefined, author }),
     { loading: 'Completing merge…', success: 'Merge completed ✔' },
   );
   if (r) { $('commit-msg').value = ''; refreshAll(); }
-});
+}
 
-$('btn-merge-abort').addEventListener('click', async () => {
+async function abortMergeAction() {
   if (await confirmModal('Abort merge', 'Resolutions made so far will be discarded. Are you sure?')) {
     const r = await withUi(api.post('/api/repo/merge/abort'), { success: 'Merge aborted' });
     if (r) refreshAll();
   }
+}
+
+async function renderMergeView() {
+  const s = await api.get('/api/repo/merge/state').catch(() => null);
+  const view = $('merge-view');
+  if (!s?.active) { view.replaceChildren(el('p', { class: 'muted' }, 'No merge in progress.')); return; }
+
+  const resolvedCount = s.totalConflicts - s.pending;
+  const pct = s.totalConflicts ? Math.round((resolvedCount / s.totalConflicts) * 100) : 100;
+
+  const fileRow = (f) => el('li', {
+    onclick: () => f.conflicted && openConflictEditor(f.filepath),
+    style: f.conflicted ? '' : 'cursor:default',
+  },
+    el('span', { class: `st st-${f.conflicted ? (f.resolved ? 'untracked' : 'conflicted') : 'modified'}` },
+      f.conflicted ? '⚡' : { add: 'A', del: 'D', mod: 'M' }[f.type] || 'M'),
+    el('span', { class: 'fname', title: f.filepath }, f.filepath),
+    el('span', { class: `mv-file-status ${f.conflicted ? (f.resolved ? 'ok' : 'pending') : 'ok'}` },
+      f.conflicted ? (f.resolved ? '✔ resolved' : 'needs resolution — click to open') : '✓ auto-merged'),
+  );
+
+  view.replaceChildren(
+    el('div', { class: 'mv-head' },
+      el('h1', {}, '⚡ Merging'),
+      el('span', { class: 'mv-branch theirs' }, s.theirs),
+      el('span', { class: 'mv-arrow' }, '→'),
+      el('span', { class: 'mv-branch ours' }, s.ours),
+    ),
+    el('p', { class: 'muted' },
+      `${s.incoming.length} incoming commit(s) · ${s.files.length} file(s) affected · ` +
+      (s.pending ? `${s.pending} conflict(s) left to resolve` : 'all conflicts resolved — ready to complete')),
+    el('div', { class: 'mv-progress-bar' }, el('div', { style: `width:${pct}%` })),
+    el('span', { class: 'muted', style: 'font-size:11px' }, `${resolvedCount}/${s.totalConflicts} conflicts resolved`),
+
+    el('div', { class: 'mv-section' },
+      el('h3', {}, 'Files'),
+      el('ul', { class: 'file-list' }, s.files.map(fileRow)),
+    ),
+
+    el('div', { class: 'mv-section' },
+      el('h3', {}, `Incoming commits from ${s.theirs}`),
+      el('ul', { class: 'commit-list' }, s.incoming.slice(0, 15).map((c) =>
+        el('li', { onclick: () => commitActions(c) },
+          el('div', { class: 'cmsg' }, c.message.split('\n')[0]),
+          el('div', { class: 'cmeta' },
+            el('span', { class: 'chash' }, c.oid.slice(0, 7)),
+            el('span', {}, c.author),
+            el('span', {}, new Date(c.date).toLocaleString())),
+        ))),
+    ),
+
+    el('div', { class: 'mv-actions' },
+      el('button', {
+        class: 'btn btn-primary', disabled: s.pending > 0,
+        title: s.pending ? 'Resolve all conflicts first' : '',
+        onclick: completeMergeAction,
+      }, `✔ Complete merge (${s.pending ? `${s.pending} pending` : 'ready'})`),
+      el('button', { class: 'btn btn-danger', onclick: abortMergeAction }, '✖ Abort merge'),
+    ),
+  );
+}
+
+$('btn-merge-view').addEventListener('click', () => showTab('merge'));
+
+let conflictFile = null;
+let conflictSegments = [];
+let conflictTextMode = false;
+
+function conflictProgress(unresolved, total) {
+  $('c-progress').textContent = total
+    ? (unresolved ? `${total - unresolved}/${total} resolved` : `all ${total} resolved ✔`)
+    : '';
+  $('c-save').disabled = !conflictTextMode && unresolved > 0;
+}
+
+async function openConflictEditor(path) {
+  const file = await withUi(api.get(`/api/repo/file?path=${encodeURIComponent(path)}`));
+  if (!file) return;
+  conflictFile = path;
+  conflictTextMode = false;
+  $('conflict-path').textContent = path;
+  conflictSegments = parseConflicts(file.content || '');
+  const hasConflicts = conflictSegments.some((s) => s.type === 'conflict');
+  if (hasConflicts) {
+    $('conflict-visual').hidden = false;
+    $('conflict-editor').hidden = true;
+    renderConflictUI($('conflict-visual'), conflictSegments,
+      { ours: repo?.branch, theirs: repo?.merge?.theirRef }, conflictProgress);
+  } else {
+    // No markers (e.g. binary or already clean): fall back to plain text.
+    conflictTextMode = true;
+    $('conflict-visual').hidden = true;
+    $('conflict-editor').hidden = false;
+    $('conflict-editor').value = file.content || '';
+    conflictProgress(0, 0);
+  }
+  showTab('conflict');
+}
+
+$('c-text').addEventListener('click', () => {
+  conflictTextMode = !conflictTextMode;
+  $('c-text').classList.toggle('btn-primary', conflictTextMode);
+  if (conflictTextMode) {
+    // Visual → text: keep picks already made, markers for the rest.
+    $('conflict-editor').value = assembleConflicts(conflictSegments).text;
+    $('conflict-visual').hidden = true;
+    $('conflict-editor').hidden = false;
+    $('c-save').disabled = false;
+  } else {
+    // Text → visual: re-parse whatever was typed.
+    conflictSegments = parseConflicts($('conflict-editor').value);
+    $('conflict-visual').hidden = false;
+    $('conflict-editor').hidden = true;
+    renderConflictUI($('conflict-visual'), conflictSegments,
+      { ours: repo?.branch, theirs: repo?.merge?.theirRef }, conflictProgress);
+  }
 });
+
+$('c-save').addEventListener('click', async () => {
+  if (!conflictFile) return;
+  let content;
+  if (conflictTextMode) {
+    content = $('conflict-editor').value;
+    if (/^(<{7}|={7}|>{7})/m.test(content)) {
+      return toast('There are still conflict markers left (<<<<<<< ======= >>>>>>>)', 'error');
+    }
+  } else {
+    const { text, unresolved } = assembleConflicts(conflictSegments);
+    if (unresolved > 0) return toast(`${unresolved} conflict(s) still unresolved`, 'error');
+    content = text;
+  }
+  const saved = await withUi(api.post('/api/repo/file', { path: conflictFile, content }));
+  if (saved === null) return;
+  const staged = await withUi(api.post('/api/repo/stage', { path: conflictFile }), { success: `Resolved: ${conflictFile}` });
+  if (staged !== null) {
+    await refreshAll();
+    if (repo?.merge) showTab('merge'); // back to the overview to pick the next file
+  }
+});
+
 
 /* ================================================================ stash === */
 
@@ -621,11 +724,13 @@ async function saveFile() {
 $('file-editor').addEventListener('input', () => setDirty(true));
 $('btn-save-file').addEventListener('click', saveFile);
 
-async function showDiff(path, oid) {
-  const q = oid ? `&oid=${oid}` : '';
+async function showDiff(path, oid, base) {
+  const q = (oid ? `&oid=${oid}` : '') + (base ? `&base=${base}` : '');
   const diff = await withUi(api.get(`/api/repo/diff?file=${encodeURIComponent(path)}${q}`));
   if (!diff) return;
-  $('diff-path').textContent = oid ? `${path} @ ${oid.slice(0, 7)}` : path;
+  $('diff-path').textContent = oid
+    ? `${path} @ ${base ? `${base.slice(0, 7)}..` : ''}${oid.slice(0, 7)}`
+    : path;
   $('diff-view').replaceChildren(renderDiff(diff.rows));
   showTab('diff');
 }
@@ -692,37 +797,124 @@ function providerFromOrigin() {
   return origin.includes('gitlab') ? 'gitlab' : 'github';
 }
 
-$('btn-create-pr').addEventListener('click', () => {
+$('btn-list-prs').addEventListener('click', async () => {
   if (!repo) return toast('Open a repository first', 'error');
+  const provider = providerFromOrigin();
+  const slug = originRepoSlug();
+  const data = await withUi(
+    api.get(`/api/providers/prs?provider=${provider}&repo=${encodeURIComponent(slug)}`),
+    { loading: 'Loading pull requests…' },
+  );
+  if (!data) return;
+  openModal(
+    el('h2', {}, `⇄ Open PRs / MRs — ${slug}`),
+    el('ul', { class: 'list-pick' },
+      data.prs.length
+        ? data.prs.map((p) => el('li', { onclick: () => window.open(p.url, '_blank') },
+            el('span', {}, `#${p.number}`),
+            el('div', { style: 'flex:1;min-width:0' },
+              el('div', {}, `${p.draft ? '📝 ' : ''}${p.title}`),
+              el('div', { class: 'muted', style: 'font-size:11px' },
+                `${p.sourceBranch} → ${p.targetBranch} · ${p.author} · ${new Date(p.createdAt).toLocaleDateString()}`)),
+          ))
+        : el('li', { class: 'muted' }, 'No open pull requests.')),
+    el('div', { class: 'modal-actions' }, el('button', { class: 'btn', onclick: closeModal }, 'Close')),
+  );
+});
+
+$('btn-create-pr').addEventListener('click', async () => {
+  if (!repo) return toast('Open a repository first', 'error');
+  const branches = await api.get('/api/repo/branches').catch(() => null);
+  if (!branches) return;
+
+  // Target candidates: every branch name known locally or on origin.
+  const remoteNames = branches.remote.map((b) => b.replace(/^origin\//, ''));
+  const targets = [...new Set([...remoteNames, ...branches.local])];
+  const defaultTarget = ['main', 'master', 'develop'].find((b) => targets.includes(b)) || targets[0];
+
+  const option = (v, selected) => el('option', { value: v, selected }, v);
   const slug = el('input', { type: 'text', value: originRepoSlug(), placeholder: 'owner/repo' });
   const title = el('input', { type: 'text', placeholder: 'PR title' });
   const body = el('textarea', { placeholder: 'Description (optional)' });
-  const source = el('input', { type: 'text', value: repo.branch });
-  const target = el('input', { type: 'text', value: 'main' });
+  const source = el('select', {}, branches.local.map((b) => option(b, b === branches.current)));
+  const target = el('select', {}, targets.map((b) => option(b, b === defaultTarget)));
+  const preview = el('div', {});
+
+  const typeLabel = { add: 'A', del: 'D', mod: 'M' };
+  const typeClass = { add: 'untracked', del: 'deleted', mod: 'modified' };
+
+  // Accordion: the file's line diff opens inside the modal, keeping your draft.
+  async function toggleInlineDiff(li, f, cmp) {
+    const next = li.nextElementSibling;
+    if (next?.classList.contains('inline-diff')) { next.remove(); return; }
+    const d = await api.get(
+      `/api/repo/diff?file=${encodeURIComponent(f.filepath)}&oid=${cmp.headOid}&base=${cmp.baseOid}`,
+    ).catch((e) => { toast(e.message, 'error'); return null; });
+    if (!d) return;
+    li.after(el('li', { class: 'inline-diff' }, el('div', { class: 'inline-diff-box' }, renderDiff(d.rows))));
+  }
+
+  async function updatePreview() {
+    if (source.value === target.value) {
+      setChildren(preview, el('p', { class: 'muted' }, 'Source and target are the same branch.'));
+      return;
+    }
+    // The PR is against the remote: compare with origin/<target> when it exists.
+    const baseRef = branches.remote.includes(`origin/${target.value}`) ? `origin/${target.value}` : target.value;
+    const cmp = await api.get(`/api/repo/compare?base=${encodeURIComponent(baseRef)}&head=${encodeURIComponent(source.value)}`)
+      .catch(() => null);
+    if (!cmp) { setChildren(preview, el('p', { class: 'muted' }, 'Could not compare branches.')); return; }
+
+    const notPushed = !branches.remote.includes(`origin/${source.value}`);
+    setChildren(preview,
+      el('div', { class: 'subsection-title' },
+        `${cmp.commits.length} commit(s) · ${cmp.files.length} file(s) — ${baseRef} ← ${source.value}`),
+      cmp.commits.length === 0
+        ? el('p', { class: 'muted', style: 'padding:0 12px' }, 'No commits to merge: nothing to create a PR from.')
+        : el('ul', { class: 'file-list', style: 'max-height:38vh;overflow:auto' },
+            cmp.files.map((f) => {
+              const li = el('li', { title: 'Click to toggle the line diff' },
+                el('span', { class: `st st-${typeClass[f.type]}` }, typeLabel[f.type]),
+                el('span', { class: 'fname' }, f.filepath),
+              );
+              li.addEventListener('click', () => toggleInlineDiff(li, f, cmp));
+              return li;
+            })),
+      notPushed && el('p', { class: 'muted', style: 'padding:0 12px' },
+        `⚠ ${source.value} is not on origin yet — push it before creating the PR, or the provider will reject it.`),
+    );
+  }
+  source.addEventListener('change', updatePreview);
+  target.addEventListener('change', updatePreview);
+
   openModal(
     el('h2', {}, '⇄ Create Pull Request / Merge Request'),
     el('div', {}, el('label', {}, 'Repository'), slug),
-    el('div', {}, el('label', {}, 'Title'), title),
-    el('div', {}, el('label', {}, 'Description'), body),
     el('div', { class: 'row' },
       el('div', { style: 'flex:1' }, el('label', {}, 'From (source)'), source),
       el('div', { style: 'flex:1' }, el('label', {}, 'Into (target)'), target),
     ),
+    preview,
+    el('div', {}, el('label', {}, 'Title'), title),
+    el('div', {}, el('label', {}, 'Description'), body),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
       el('button', {
         class: 'btn btn-primary',
         onclick: async () => {
+          if (!title.value.trim()) { title.focus(); return toast('Write a PR title', 'error'); }
           const r = await withUi(api.post('/api/providers/pr', {
             provider: providerFromOrigin(), repo: slug.value.trim(),
             title: title.value.trim(), body: body.value,
-            sourceBranch: source.value.trim(), targetBranch: target.value.trim(),
+            sourceBranch: source.value, targetBranch: target.value,
           }), { loading: 'Creating PR…' });
           if (r) { closeModal(); toast(`PR #${r.number} created ✔`, 'success', 6000); window.open(r.url, '_blank'); }
         },
       }, 'Create'),
     ),
   );
+  document.getElementById('modal').classList.add('wide'); // room for inline diffs
+  updatePreview();
 });
 
 $('btn-issues').addEventListener('click', async () => {

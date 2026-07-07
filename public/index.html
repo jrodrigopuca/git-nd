@@ -74,6 +74,7 @@
         <main class="center">
           <nav class="tabs" id="tabs">
             <button class="tab active" data-tab="graph">Graph</button>
+            <button class="tab" data-tab="merge" id="tab-btn-merge" hidden>⚡ Merge</button>
             <button class="tab" data-tab="file" hidden>File</button>
             <button class="tab" data-tab="diff" hidden>Diff</button>
             <button class="tab" data-tab="conflict" hidden>Conflict</button>
@@ -81,6 +82,10 @@
 
           <section class="tab-content active" id="tab-graph">
             <div class="graph-wrap" id="graph-wrap"><p class="muted pad">Open a repository to see the graph.</p></div>
+          </section>
+
+          <section class="tab-content" id="tab-merge">
+            <div class="merge-view" id="merge-view"></div>
           </section>
 
           <section class="tab-content" id="tab-file">
@@ -103,23 +108,20 @@
             <div class="conflict-head">
               <span id="conflict-path"></span>
               <div class="conflict-actions">
-                <button class="btn btn-xs" id="c-ours">Keep local (ours)</button>
-                <button class="btn btn-xs" id="c-theirs">Keep incoming (theirs)</button>
-                <button class="btn btn-xs btn-primary" id="c-save">💾 Save & mark resolved</button>
+                <span class="muted" id="c-progress"></span>
+                <button class="btn btn-xs" id="c-text" title="Toggle raw text editing">✏️ Text mode</button>
+                <button class="btn btn-xs btn-primary" id="c-save" disabled>💾 Save & mark resolved</button>
               </div>
             </div>
-            <textarea class="conflict-editor" id="conflict-editor" spellcheck="false"></textarea>
+            <div class="cf-wrap" id="conflict-visual"></div>
+            <textarea class="conflict-editor" id="conflict-editor" spellcheck="false" hidden></textarea>
           </section>
         </main>
 
         <aside class="rightbar" id="rightbar">
           <div class="merge-banner" id="merge-banner" hidden>
             <strong>⚠ Merge in progress</strong>
-            <div id="merge-files"></div>
-            <div class="row">
-              <button class="btn btn-xs btn-primary" id="btn-merge-done">Complete merge</button>
-              <button class="btn btn-xs btn-danger" id="btn-merge-abort">Abort</button>
-            </div>
+            <button class="btn btn-xs btn-primary" id="btn-merge-view">⚡ Open merge view</button>
           </div>
 
           <details open class="section">
@@ -167,7 +169,8 @@
           <details class="section">
             <summary>Pull Request / Issues</summary>
             <div class="pad-h col">
-              <button class="btn" id="btn-create-pr">⇄ Create Pull Request</button>
+              <button class="btn" id="btn-list-prs">⇄ Open PRs / MRs</button>
+              <button class="btn" id="btn-create-pr">＋ Create Pull Request</button>
               <button class="btn" id="btn-issues">🐛 View issues</button>
             </div>
           </details>

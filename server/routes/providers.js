@@ -11,8 +11,8 @@ const h = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).then(
 );
 
 function tokenFor(req, provider) {
-  const token = req.session.tokens?.[provider];
-  if (!token) throw new AppError(`Not authenticated with ${provider}`, 401);
+  const token = tokenStore.get(provider);
+  if (!token) throw new AppError(`Not authenticated with ${provider}: connect it in the Connections view`, 401);
   return token;
 }
 
@@ -28,6 +28,13 @@ providersRouter.post('/api/providers/pr', h(async (req) => {
   const { provider = 'github', ...params } = req.body;
   const token = tokenFor(req, provider);
   return getProvider(provider).createPullRequest(token, params);
+}));
+
+/* GET /api/providers/prs?provider=github&repo=owner/name → open PRs/MRs */
+providersRouter.get('/api/providers/prs', h(async (req) => {
+  const { provider = 'github', repo } = req.query;
+  const token = tokenFor(req, provider);
+  return { prs: await getProvider(provider).listPullRequests(token, { repo }) };
 }));
 
 /* GET /api/providers/issues?provider=github&repo=owner/name */

@@ -109,14 +109,17 @@ repoRouter.post('/api/repo/merge', h(async (req) => {
   return result;
 }));
 
+repoRouter.get('/api/repo/merge/state', h(() => gitSvc.mergeDetail()));
+
 repoRouter.post('/api/repo/merge/abort', h(async () => {
   await gitSvc.abortMerge();
   broadcast('merge-updated', { aborted: true });
 }));
 
-/* ---- diff / commit detail ---- */
-repoRouter.get('/api/repo/diff', h((req) => gitSvc.diffFile(req.query.file, req.query.oid)));
+/* ---- diff / commit detail / compare ---- */
+repoRouter.get('/api/repo/diff', h((req) => gitSvc.diffFile(req.query.file, req.query.oid, req.query.base)));
 repoRouter.get('/api/repo/commit', h((req) => gitSvc.commitDetail(req.query.oid)));
+repoRouter.get('/api/repo/compare', h((req) => gitSvc.compareRefs(req.query.base, req.query.head)));
 
 /* ---- branches ---- */
 repoRouter.get('/api/repo/branches', h(() => gitSvc.listBranches()));

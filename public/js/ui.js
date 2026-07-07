@@ -27,7 +27,8 @@ const modalBox = () => document.getElementById('modal');
 
 export function openModal(...content) {
   const modal = modalBox();
-  modal.replaceChildren(...content);
+  // replaceChildren coerces null/false to literal "null"/"false" text nodes.
+  modal.replaceChildren(...content.filter((c) => c != null && c !== false));
   backdrop().hidden = false;
   const first = modal.querySelector('input, textarea, select');
   if (first) setTimeout(() => first.focus(), 30);
@@ -35,7 +36,14 @@ export function openModal(...content) {
 
 export function closeModal() {
   backdrop().hidden = true;
-  modalBox().replaceChildren();
+  const modal = modalBox();
+  modal.classList.remove('wide');
+  modal.replaceChildren();
+}
+
+/** Safe replaceChildren: drops null/false instead of rendering them as text. */
+export function setChildren(node, ...children) {
+  node.replaceChildren(...children.flat().filter((c) => c != null && c !== false));
 }
 
 document.addEventListener('keydown', (e) => {

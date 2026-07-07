@@ -58,6 +58,20 @@ export class GitLabProvider {
     return { url: mr.web_url, number: mr.iid };
   }
 
+  async listPullRequests(token, { repo }) {
+    const mrs = await gl(token, `/projects/${encodeURIComponent(repo)}/merge_requests?state=opened&per_page=50`);
+    return mrs.map((p) => ({
+      number: p.iid,
+      title: p.title,
+      author: p.author?.username,
+      sourceBranch: p.source_branch,
+      targetBranch: p.target_branch,
+      url: p.web_url,
+      createdAt: p.created_at,
+      draft: p.draft || p.work_in_progress,
+    }));
+  }
+
   async listIssues(token, { repo }) {
     const issues = await gl(token, `/projects/${encodeURIComponent(repo)}/issues?state=opened&per_page=50`);
     return issues.map((i) => ({

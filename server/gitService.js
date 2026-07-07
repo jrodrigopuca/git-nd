@@ -201,7 +201,8 @@ async function resolveAuthor(dir, author) {
 
 export async function commit({ message, author }) {
   const dir = repoState.requireRepo();
-  if (!message?.trim()) throw new AppError('Commit message is required', 400);
+  // Merge commits have a sensible default message ("Merge <ref>").
+  if (!message?.trim() && !repoState.merge) throw new AppError('Commit message is required', 400);
   const who = await resolveAuthor(dir, author);
   if (author?.name && author?.email) {
     // Persist per repo (.git/config). The app-wide default is only seeded
@@ -476,6 +477,19 @@ async function doMerge(theirRef, author) {
     if (err.code === 'MergeConflictError' || err.name === 'MergeConflictError') {
       const files = err.data?.filepaths || [];
       repoState.merge = { theirRef, theirOid, files, resolved: [] };
+      // isomorphic-git writes merge results to the workdir but stages nothing.
+      // Stage the auto-merged (non-conflicted) files like real git does, or
+      // the final merge commit would silently drop them.
+      const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+      const conflicted = new Set(files);
+      for (const { filepath } of await changedFiles(dir, headOid, theirOid)) {
+        if (conflicted.has(filepath)) continue;
+        if (fs.existsSync(path.join(dir, filepath))) {
+          await git.add({ fs, dir, filepath });
+        } else {
+          await git.remove({ fs, dir, filepath });
+        }
+      }
       return { conflicts: files };
     }
     throw err;
@@ -622,6 +636,56 @@ export async function mergeBranch({ theirRef, author }) {
 
 /* ------------------------------------------------------------ conflicts --- */
 
+/** What `head` would contribute on top of `base`: commits + changed files. */
+export async function compareRefs(base, head) {
+  const dir = repoState.requireRepo();
+  if (!base || !head) throw new AppError('base and head refs are required', 400);
+  const baseOid = await git.resolveRef({ fs, dir, ref: base });
+  const headOid = await git.resolveRef({ fs, dir, ref: head });
+  const [baseLog, headLog] = await Promise.all([
+    git.log({ fs, dir, ref: baseOid, depth: 300 }),
+    git.log({ fs, dir, ref: headOid, depth: 300 }),
+  ]);
+  const baseSet = new Set(baseLog.map((c) => c.oid));
+  const commits = headLog.filter((c) => !baseSet.has(c.oid)).map(mapCommit);
+  const files = baseOid === headOid ? [] : await changedFiles(dir, baseOid, headOid);
+  return { base, head, baseOid, headOid, commits, files };
+}
+
+/** Full picture of the in-progress merge for the Merge view. */
+export async function mergeDetail() {
+  const dir = repoState.requireRepo();
+  const m = repoState.merge;
+  if (!m) return { active: false };
+
+  const ours = await currentBranch();
+  const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+  const [ourLog, theirLog] = await Promise.all([
+    git.log({ fs, dir, ref: headOid, depth: 200 }),
+    git.log({ fs, dir, ref: m.theirOid, depth: 200 }),
+  ]);
+  const ourSet = new Set(ourLog.map((c) => c.oid));
+  const incoming = theirLog.filter((c) => !ourSet.has(c.oid)).map(mapCommit);
+
+  const changed = await changedFiles(dir, headOid, m.theirOid);
+  const conflictedSet = new Set(m.files);
+  const files = [
+    ...m.files.map((f) => ({ filepath: f, conflicted: true, resolved: m.resolved.includes(f) })),
+    ...changed
+      .filter((c) => !conflictedSet.has(c.filepath))
+      .map((c) => ({ filepath: c.filepath, conflicted: false, type: c.type })),
+  ];
+  return {
+    active: true,
+    ours,
+    theirs: m.theirRef,
+    incoming,
+    files,
+    pending: m.files.filter((f) => !m.resolved.includes(f)).length,
+    totalConflicts: m.files.length,
+  };
+}
+
 export async function completeMerge({ message, author }) {
   const dir = repoState.requireRepo();
   const merge = repoState.merge;
@@ -674,10 +738,19 @@ const blobText = async (dir, oid, rel) => {
 /**
  * Without oid: HEAD vs working directory (uncommitted changes).
  * With oid: that commit vs its first parent (what the commit changed).
+ * With oid + base: the file between two arbitrary refs (branch compare).
  */
-export async function diffFile(filepath, oid) {
+export async function diffFile(filepath, oid, base) {
   const dir = repoState.requireRepo();
   const rel = repoState.relPath(filepath);
+
+  if (oid && base) {
+    const [oldText, newText] = await Promise.all([
+      blobText(dir, base, rel),
+      blobText(dir, oid, rel),
+    ]);
+    return { filepath: rel, oid, base, rows: sideBySideRows(oldText, newText) };
+  }
 
   if (oid) {
     const c = await git.readCommit({ fs, dir, oid });

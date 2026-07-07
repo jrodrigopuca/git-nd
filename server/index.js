@@ -14,6 +14,35 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3847;
 
 const app = express();
+
+/**
+ * Localhost hardening. The API has no per-request auth (tokens live
+ * server-side), so the browser's same-origin rules are the security boundary:
+ *  - Host allowlist stops DNS-rebinding (evil.com resolving to 127.0.0.1).
+ *  - Origin allowlist stops CSRF (a malicious page POSTing to localhost).
+ * Non-browser clients (curl, scripts) send no Origin and are unaffected.
+ */
+const ALLOWED_HOSTS = new Set([`localhost:${PORT}`, `127.0.0.1:${PORT}`, `[::1]:${PORT}`]);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true; // same-origin GETs and non-browser clients
+  try {
+    return ALLOWED_HOSTS.has(new URL(origin).host);
+  } catch {
+    return false;
+  }
+}
+
+app.use((req, res, next) => {
+  if (!ALLOWED_HOSTS.has(req.headers.host)) {
+    return res.status(403).json({ error: 'Forbidden: unexpected Host header' });
+  }
+  if (!isAllowedOrigin(req.headers.origin)) {
+    return res.status(403).json({ error: 'Forbidden: cross-origin requests are not allowed' });
+  }
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 const sessionMiddleware = session({
@@ -57,7 +86,14 @@ function humanize(err) {
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
-wss.on('connection', (ws) => registerSocket(ws));
+wss.on('connection', (ws, req) => {
+  // Browsers always send Origin on WebSocket upgrades; enforce it too.
+  if (!ALLOWED_HOSTS.has(req.headers.host) || !isAllowedOrigin(req.headers.origin)) {
+    ws.close(1008, 'Forbidden origin');
+    return;
+  }
+  registerSocket(ws);
+});
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  git-nd running at http://localhost:${PORT}\n`);

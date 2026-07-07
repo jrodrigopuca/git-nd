@@ -39,6 +39,21 @@ const svgEl = (tag, attrs) => {
 
 const labelWidth = (name) => name.length * 6.4 + 16;
 
+/* Author avatar: initials on a circle, color hashed from the email so the
+   same person always gets the same color across sessions and repos. */
+const AVATAR_COLORS = ['#5b8def', '#3fa66a', '#c2913a', '#c95d5b', '#9b6fc9', '#3fa9a5', '#c97a45', '#7287d6'];
+
+function authorColor(email) {
+  let h = 0;
+  for (const ch of email || '?') h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+function initials(name) {
+  const words = (name || '?').trim().split(/\s+/);
+  return ((words[0]?.[0] || '') + (words[1]?.[0] || '')).toUpperCase() || '?';
+}
+
 export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {}) {
   const { lane, maxLanes } = computeLanes(commits);
   const row = new Map(commits.map((c, i) => [c.oid, i]));
@@ -86,11 +101,27 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
       'stroke-width': isHead ? 2 : 1.5,
     }));
 
-    let x = textX;
+    // Author avatar: initials chip, hover for full name/email.
+    const av = svgEl('g', {});
+    av.append(svgEl('circle', { cx: textX + 9, cy: cy(i), r: 9, fill: authorColor(c.email) }));
+    const avText = svgEl('text', {
+      x: textX + 9, y: cy(i) + 3, 'text-anchor': 'middle',
+      style: 'font-size:8.5px; font-weight:700; fill:#fff; pointer-events:none',
+    });
+    avText.textContent = initials(c.author);
+    const avTitle = svgEl('title', {});
+    avTitle.textContent = `${c.author} <${c.email}>`;
+    av.append(avText, avTitle);
+    g.append(av);
+
+    let x = textX + 26;
     for (const t of (tips[c.oid] || [])) {
-      const w = labelWidth(t.name);
+      // Long branch names (dependabot/…) get truncated; full name in tooltip.
+      const shown = t.name.length > 24 ? `${t.name.slice(0, 11)}…${t.name.slice(-11)}` : t.name;
+      const w = labelWidth(shown);
       const color = t.current ? 'var(--accent)' : COLORS[lane.get(c.oid) % COLORS.length];
-      g.append(svgEl('rect', {
+      const chip = svgEl('g', {});
+      chip.append(svgEl('rect', {
         x, y: cy(i) - 9, width: w, height: 18, rx: 9,
         fill: t.current ? color : 'transparent',
         stroke: color, 'stroke-width': 1.2,
@@ -100,15 +131,22 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
         x: x + w / 2, y: cy(i) + 3.5, 'text-anchor': 'middle',
         style: `font-size:10.5px; fill: ${t.current ? 'var(--accent-fg)' : 'var(--fg)'}`,
       });
-      label.textContent = t.name;
-      g.append(label);
+      label.textContent = shown;
+      chip.append(label);
+      if (shown !== t.name) {
+        const tip = svgEl('title', {});
+        tip.textContent = t.name;
+        chip.append(tip);
+      }
+      g.append(chip);
       x += w + 6;
     }
 
     const msg = svgEl('text', { x, y: cy(i) + 4, class: 'graph-msg' });
     msg.textContent = c.message.split('\n')[0].slice(0, 70);
-    const meta = svgEl('text', { x: textX + 460, y: cy(i) + 4, class: 'graph-meta' });
-    meta.textContent = `${c.oid.slice(0, 7)} · ${c.author} · ${new Date(c.date).toLocaleDateString()}`;
+    // Author lives in the avatar; keep the meta line lean.
+    const meta = svgEl('text', { x: textX + 480, y: cy(i) + 4, class: 'graph-meta' });
+    meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
     g.append(msg, meta);
     if (onSelect) g.addEventListener('click', () => onSelect(c));
     svg.append(g);
