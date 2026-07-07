@@ -32,7 +32,9 @@ The app is organized into three views (activity bar on the left, IDE-style):
 - **Pull with rebase**: replay your commits on top of the remote for linear history (mode picker next to Pull; aborts safely on conflicts and suggests merge)
 - **Ahead/behind indicators**: Fetch button + auto-fetch every 2 min; incoming/outgoing counts as badges on Pull/Push, Sourcetree-style
 - **Branches**: create, switch, delete, merge; checking out a remote branch (`origin/x`) creates and switches to the matching local branch; multi-branch SVG commit graph with branch labels (current branch highlighted, remotes dashed)
-- **History**: commit list + revert (hard reset) to any commit; click a commit to see its changed files and per-file line diff
+- **History**: commit list; click a commit to see its changed files and per-file line diff, and act on it — **safe revert** (inverse commit, history preserved), **cherry-pick** onto the current branch, **tag** it, or hard reset (clearly marked destructive). File-level conflict guards abort cleanly instead of guessing
+- **Amend**: "Amend last commit" checkbox in the commit box — prefills the last message, keeps the original author, adds whatever is staged
+- **Tags**: create from any commit, shown as 🏷 chips in the graph, push/delete via API
 - **Author identity, git-style**: resolution order is repo `.git/config` → connected provider account matching the repo's origin (GitHub/GitLab, using the provider's commit email) → app-wide default (`~/.git-nd/settings.json`). Committing pins the identity to that repo, so each repo can carry its own user/email (work vs personal); the global default is seeded once and never clobbered
 - **Stage all / unstage all** with one click; empty commits are blocked (a commit snapshots the index — nothing staged, nothing to commit)
 - **Merge view**: any merge with conflicts (pull, local or remote branch) opens a dedicated ⚡ Merge tab — which branches are merging, incoming commits, every affected file (conflicted vs auto-merged), a progress bar, and Complete/Abort actions. Complete only unlocks when every conflict is resolved

@@ -298,6 +298,10 @@ export async function historyAll({ depth = 100 } = {}) {
     } catch { /* dangling ref */ }
   }
 
+  for (const t of await listTagsDetailed().catch(() => [])) {
+    if (seen.has(t.oid)) (tips[t.oid] ||= []).push({ name: t.name, tag: true });
+  }
+
   let headOid = null;
   try { headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' }); } catch { /* empty repo */ }
   return { commits: topoSort([...seen.values()]), tips, headOid, current };
@@ -348,6 +352,142 @@ export async function commitDetail(oid) {
     files = entries.flat(Infinity).filter(Boolean);
   }
   return { ...mapCommit(c), files };
+}
+
+async function requireCleanTree(dir) {
+  const matrix = await git.statusMatrix({ fs, dir });
+  if (matrix.some(([, h, w, s]) => !(h === 1 && w === 1 && s === 1))) {
+    throw new AppError('Working tree has local changes: commit or stash them first', 409);
+  }
+}
+
+/**
+ * Write `targetOid`'s version of each file, but only if the current content
+ * still equals `guardOid`'s version — otherwise a later commit touched it and
+ * we abort instead of guessing (same conservative policy as the rebase).
+ */
+async function applyDelta(dir, files, targetOid, guardOid, headOid) {
+  for (const { filepath } of files) {
+    const [guardBlob, currentBlob, targetBlob] = await Promise.all([
+      readBlobAt(dir, guardOid, filepath),
+      readBlobAt(dir, headOid, filepath),
+      readBlobAt(dir, targetOid, filepath),
+    ]);
+    if (!bufEq(currentBlob, guardBlob)) {
+      throw new AppError(`Conflict in ${filepath}: it changed after that commit. Resolve manually.`, 409);
+    }
+    const abs = path.join(dir, filepath);
+    if (targetBlob === null) {
+      await fsp.rm(abs, { force: true });
+      await git.remove({ fs, dir, filepath });
+    } else {
+      await fsp.mkdir(path.dirname(abs), { recursive: true });
+      await fsp.writeFile(abs, targetBlob);
+      await git.add({ fs, dir, filepath });
+    }
+  }
+}
+
+async function replayCommitOp(oid, author, mode) {
+  const dir = repoState.requireRepo();
+  if (repoState.merge) throw new AppError('A merge is in progress: resolve or abort it first', 409);
+  oid = await git.expandOid({ fs, dir, oid }); // accept short hashes too
+  await requireCleanTree(dir);
+  const branch = await git.currentBranch({ fs, dir, fullname: false });
+  if (!branch) throw new AppError('Detached HEAD: check out a branch first', 400);
+
+  const c = await git.readCommit({ fs, dir, oid });
+  if (c.commit.parent.length > 1) throw new AppError(`Cannot ${mode} a merge commit`, 409);
+  const parent = c.commit.parent[0];
+  if (!parent) throw new AppError(`Cannot ${mode} the root commit`, 409);
+
+  const files = await changedFiles(dir, parent, oid);
+  const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+  try {
+    if (mode === 'revert') {
+      await applyDelta(dir, files, parent, oid, headOid);
+      const subject = c.commit.message.split('\n')[0];
+      const who = await resolveAuthor(dir, author);
+      return {
+        oid: await git.commit({
+          fs, dir, author: who,
+          message: `Revert "${subject}"\n\nThis reverts commit ${oid}.`,
+        }),
+      };
+    }
+    // cherry-pick: keep the original author, current user becomes committer.
+    await applyDelta(dir, files, oid, parent, headOid);
+    const who = await resolveAuthor(dir, author);
+    return {
+      oid: await git.commit({
+        fs, dir,
+        message: c.commit.message,
+        author: { name: c.commit.author.name, email: c.commit.author.email },
+        committer: who,
+      }),
+    };
+  } catch (err) {
+    await git.checkout({ fs, dir, ref: branch, force: true }); // restore, tree was clean
+    throw err;
+  }
+}
+
+export const revertCommit = (oid, author) => replayCommitOp(oid, author, 'revert');
+export const cherryPick = (oid, author) => replayCommitOp(oid, author, 'cherry-pick');
+
+/** Rewrite the branch tip: same parents, current index, new/old message. */
+export async function amendCommit({ message, author }) {
+  const dir = repoState.requireRepo();
+  if (repoState.merge) throw new AppError('Cannot amend during a merge', 409);
+  const branch = await git.currentBranch({ fs, dir, fullname: false });
+  if (!branch) throw new AppError('Detached HEAD: cannot amend', 400);
+  const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+  const head = await git.readCommit({ fs, dir, oid: headOid });
+  const who = await resolveAuthor(dir, author);
+  const oid = await git.commit({
+    fs, dir,
+    message: message?.trim() || head.commit.message,
+    parent: head.commit.parent,
+    author: { name: head.commit.author.name, email: head.commit.author.email }, // keep original author
+    committer: who,
+  });
+  return { oid, amended: headOid };
+}
+
+/* ----------------------------------------------------------------- tags --- */
+
+export async function listTagsDetailed() {
+  const dir = repoState.requireRepo();
+  const names = await git.listTags({ fs, dir });
+  return Promise.all(names.map(async (name) => {
+    let oid = await git.resolveRef({ fs, dir, ref: `refs/tags/${name}` });
+    try {
+      const t = await git.readTag({ fs, dir, oid });
+      oid = t.tag.object; // annotated tag → the commit it points to
+    } catch { /* lightweight tag: already a commit oid */ }
+    return { name, oid };
+  }));
+}
+
+export async function createTag(name, oid) {
+  const dir = repoState.requireRepo();
+  if (!/^[\w.\-/]+$/.test(name || '')) throw new AppError('Invalid tag name', 400);
+  await git.tag({ fs, dir, ref: name, object: oid || undefined });
+}
+
+export async function deleteTag(name) {
+  const dir = repoState.requireRepo();
+  await git.deleteTag({ fs, dir, ref: name });
+}
+
+export async function pushTag(name, tokens) {
+  const dir = repoState.requireRepo();
+  const url = await remoteUrl(dir, 'origin');
+  await git.push({
+    fs, http, dir, remote: 'origin',
+    ref: `refs/tags/${name}`, remoteRef: `refs/tags/${name}`,
+    onAuth: authFor(url, tokens),
+  });
 }
 
 export async function resetToCommit(oid) {

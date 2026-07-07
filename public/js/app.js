@@ -277,15 +277,34 @@ function parseAuthor(text) {
 
 async function doCommit() {
   const message = $('commit-msg').value.trim();
-  if (!message) { $('commit-msg').focus(); return toast('Write a commit message', 'error'); }
+  const amend = $('amend-check').checked;
+  if (!message && !amend) { $('commit-msg').focus(); return toast('Write a commit message', 'error'); }
   const author = parseAuthor($('commit-author').value.trim());
   const result = await withUi(
-    api.post('/api/repo/commit', { message, author }),
-    { loading: 'Committing…', success: 'Commit created ✔' },
+    api.post(amend ? '/api/repo/amend' : '/api/repo/commit', { message, author }),
+    { loading: amend ? 'Amending…' : 'Committing…', success: amend ? 'Commit amended ✔' : 'Commit created ✔' },
   );
-  if (result) { $('commit-msg').value = ''; refreshAll(); loadAuthor(); }
+  if (result) {
+    $('commit-msg').value = '';
+    $('amend-check').checked = false;
+    updateCommitButton();
+    refreshAll();
+    loadAuthor();
+  }
 }
 $('btn-commit').addEventListener('click', doCommit);
+
+function updateCommitButton() {
+  $('btn-commit').textContent = $('amend-check').checked ? '✏️ Amend' : '✔ Commit';
+}
+$('amend-check').addEventListener('change', async () => {
+  updateCommitButton();
+  // Prefill the last message so amending keeps it by default.
+  if ($('amend-check').checked && !$('commit-msg').value.trim()) {
+    const last = await api.get('/api/repo/history?depth=1').catch(() => null);
+    if (last?.[0]) $('commit-msg').value = last[0].message;
+  }
+});
 
 /* ================================================== push/pull/fetch/sync === */
 
@@ -403,18 +422,60 @@ async function commitActions(c) {
         el('span', { class: `st st-${typeClass[f.type]}` }, typeLabel[f.type]),
         el('span', { class: 'fname', title: f.filepath }, f.filepath),
       ))),
-    el('div', { class: 'modal-actions' },
+    el('div', { class: 'modal-actions', style: 'flex-wrap:wrap' },
       el('button', {
-        class: 'btn btn-danger',
+        class: 'btn', title: 'Create a new commit that undoes this one — history is preserved',
         onclick: async () => {
           closeModal();
-          if (await confirmModal('Revert to this commit',
+          const r = await withUi(
+            api.post('/api/repo/revert', { oid: c.oid, author: parseAuthor($('commit-author').value.trim()) }),
+            { loading: 'Reverting…', success: `Revert commit created ✔` },
+          );
+          if (r) refreshAll();
+        },
+      }, '↩ Revert (safe)'),
+      el('button', {
+        class: 'btn', title: 'Apply this commit on top of the current branch',
+        onclick: async () => {
+          closeModal();
+          const r = await withUi(
+            api.post('/api/repo/cherry-pick', { oid: c.oid, author: parseAuthor($('commit-author').value.trim()) }),
+            { loading: 'Cherry-picking…', success: 'Commit cherry-picked ✔' },
+          );
+          if (r) refreshAll();
+        },
+      }, '🍒 Cherry-pick'),
+      el('button', {
+        class: 'btn',
+        onclick: () => {
+          const name = el('input', { type: 'text', placeholder: 'v1.0.0' });
+          const create = async () => {
+            if (!name.value.trim()) return;
+            const r = await withUi(api.post('/api/repo/tag', { name: name.value.trim(), oid: c.oid }), { success: `Tag ${name.value} created 🏷` });
+            if (r) { closeModal(); refreshAll(); }
+          };
+          name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
+          openModal(
+            el('h2', {}, `🏷 Tag commit ${c.oid.slice(0, 7)}`),
+            el('div', {}, el('label', {}, 'Tag name'), name),
+            el('div', { class: 'modal-actions' },
+              el('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
+              el('button', { class: 'btn btn-primary', onclick: create }, 'Create tag'),
+            ),
+          );
+        },
+      }, '🏷 Tag'),
+      el('button', {
+        class: 'btn btn-danger', title: 'Destructive: moves the branch here and drops later commits',
+        onclick: async () => {
+          closeModal();
+          if (await confirmModal('Hard reset to this commit',
             `The current branch will point to ${c.oid.slice(0, 7)} and the working directory will be restored (hard reset). Later commits are dropped from the branch. Are you sure?`)) {
             const r = await withUi(api.post('/api/repo/reset', { oid: c.oid }), { loading: 'Resetting…', success: 'Branch reset' });
             if (r) refreshAll();
           }
         },
-      }, '⏪ Revert to this commit'),
+      }, '⏪ Hard reset'),
       el('button', { class: 'btn', onclick: closeModal }, 'Close'),
     ),
   );

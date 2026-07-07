@@ -117,9 +117,10 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
     let x = textX + 26;
     for (const t of (tips[c.oid] || [])) {
       // Long branch names (dependabot/…) get truncated; full name in tooltip.
-      const shown = t.name.length > 24 ? `${t.name.slice(0, 11)}…${t.name.slice(-11)}` : t.name;
+      const raw = t.tag ? `🏷 ${t.name}` : t.name;
+      const shown = raw.length > 24 ? `${raw.slice(0, 11)}…${raw.slice(-11)}` : raw;
       const w = labelWidth(shown);
-      const color = t.current ? 'var(--accent)' : COLORS[lane.get(c.oid) % COLORS.length];
+      const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent)' : COLORS[lane.get(c.oid) % COLORS.length];
       const chip = svgEl('g', {});
       chip.append(svgEl('rect', {
         x, y: cy(i) - 9, width: w, height: 18, rx: 9,
@@ -133,7 +134,7 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
       });
       label.textContent = shown;
       chip.append(label);
-      if (shown !== t.name) {
+      if (shown !== raw) {
         const tip = svgEl('title', {});
         tip.textContent = t.name;
         chip.append(tip);

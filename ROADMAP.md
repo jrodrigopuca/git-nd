@@ -13,8 +13,8 @@ Status: `[ ]` pending · `[x]` done.
 1. ~~CSRF / localhost hardening~~ ✅ (T1.1)
 2. ~~Hunk staging~~ ✅ (T1.2 — per-line checkboxes still pending)
 3. ~~File watcher auto-refresh~~ ✅ (T1.4)
-4. Hybrid native-git backend → SSH + performance (T1.3)
-5. Missing history operations: revert, amend, cherry-pick, tags (T1.5)
+4. ~~History operations: revert, amend, cherry-pick, tags~~ ✅ (T1.5 — interactive rebase pending)
+5. **Next session →** Hybrid native-git backend → SSH + performance (T1.3)
 6. Desktop packaging with Tauri (T3.1)
 
 ---
@@ -76,19 +76,20 @@ The app should feel alive like Sourcetree.
 Verified: external file edits, `git commit` and `git checkout` from a terminal
 all refresh the UI (Changes list and branch chip) with no user interaction.
 
-### T1.5 `[ ]` Missing history operations — **M**
+### T1.5 `[x]` Missing history operations — **M** *(shipped, minus interactive rebase)*
 
-- **Revert (safe)**: create the inverse commit of a given commit
-  (compute reverse diff, apply, commit "Revert …"). Today only hard reset
-  exists, which is destructive — indefensible as the only option.
-- **Amend**: `git.commit({ amend: true })` equivalent — replace tip keeping
-  parents; UI checkbox "Amend last commit" in the commit box.
-- **Cherry-pick**: replay a single commit onto HEAD (the rebase engine's
-  replay step already does 90% of this).
-- **Tags**: list/create/delete/push (`git.tag`, `git.listTags`); show as chips
-  in the graph next to branch labels.
-- **Interactive rebase** (squash/reorder/drop): build on the replay engine;
-  UI = drag-to-reorder commit list. Largest piece; can ship last.
+- **Revert (safe)** ✅ — inverse commit via `POST /api/repo/revert`; file-level
+  conflict guard (aborts clean, tree restored) like the rebase engine; blocks
+  merge/root commits; accepts short hashes (`expandOid`).
+- **Amend** ✅ — `POST /api/repo/amend`: rewrites the tip with same parents +
+  current index; keeps original author, current user as committer; UI checkbox
+  in the commit box prefills the last message and flips the button to "Amend".
+- **Cherry-pick** ✅ — `POST /api/repo/cherry-pick`: replays a commit onto HEAD
+  with the same guard; original author preserved, message kept.
+- **Tags** ✅ — list/create/delete/push (lightweight); yellow 🏷 chips in the
+  graph; create from any commit's modal.
+- **Interactive rebase** `[ ]` (squash/reorder/drop): build on the replay
+  engine; UI = drag-to-reorder commit list. Largest piece; still pending.
 
 ## Tier 2 — Quality of life
 

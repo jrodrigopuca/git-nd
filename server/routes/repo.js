@@ -100,6 +100,33 @@ repoRouter.post('/api/repo/reset', h(async (req) => {
   return result;
 }));
 
+repoRouter.post('/api/repo/revert', h(async (req) => {
+  const result = await gitSvc.revertCommit(req.body.oid, req.body.author);
+  broadcast('commit-completed', result);
+  return result;
+}));
+
+repoRouter.post('/api/repo/cherry-pick', h(async (req) => {
+  const result = await gitSvc.cherryPick(req.body.oid, req.body.author);
+  broadcast('commit-completed', result);
+  return result;
+}));
+
+repoRouter.post('/api/repo/amend', h(async (req) => {
+  const result = await gitSvc.amendCommit(req.body);
+  broadcast('commit-completed', result);
+  return result;
+}));
+
+/* ---- tags ---- */
+repoRouter.get('/api/repo/tags', h(() => gitSvc.listTagsDetailed()));
+repoRouter.post('/api/repo/tag', h(async (req) => {
+  await gitSvc.createTag(req.body.name, req.body.oid);
+  broadcast('branch-changed', { tag: req.body.name });
+}));
+repoRouter.post('/api/repo/tag/delete', h((req) => gitSvc.deleteTag(req.body.name)));
+repoRouter.post('/api/repo/tag/push', h((req) => gitSvc.pushTag(req.body.name, tokenStore.tokens())));
+
 /* ---- push / pull / merge ---- */
 repoRouter.post('/api/repo/push', h(async (req) => {
   const result = await gitSvc.push({ ...req.body, tokens: tokenStore.tokens() });
