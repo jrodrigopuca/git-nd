@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>git-nd</title>
+  <link rel="stylesheet" href="/css/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌿</text></svg>" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🌿 <strong>git-nd</strong></div>
+    <div class="repo-chip" id="repo-chip" hidden>
+      <button class="btn btn-ghost" id="repo-name" title="Switch repository (Explorer)"></button>
+      <button class="btn btn-ghost" id="btn-branch" title="Switch branch">⎇ <span id="branch-name"></span></button>
+    </div>
+    <div class="spacer"></div>
+    <button class="btn" id="btn-clone">⬇ Clone</button>
+    <button class="btn btn-ghost" id="btn-fetch" title="Fetch: check the remote for incoming changes">↻ Fetch</button>
+    <button class="btn" id="btn-pull" title="Pull">⇣ Pull<span class="count-badge" id="behind-badge" hidden></span></button>
+    <button class="btn btn-ghost" id="btn-pull-mode" title="Pull mode (merge / rebase)">▾</button>
+    <button class="btn" id="btn-push" title="Push (Ctrl+Shift+P)">⇡ Push<span class="count-badge" id="ahead-badge" hidden></span></button>
+    <button class="btn btn-ghost" id="btn-theme" title="Light/dark mode">🌙</button>
+    <button class="btn btn-ghost" id="btn-auth" title="Connections">👤 Connect</button>
+  </header>
+
+  <div class="app">
+    <nav class="activity-bar">
+      <button class="act-btn" data-view="explorer" title="Explorer — browse folders & repositories">🗂️</button>
+      <button class="act-btn active" data-view="repo" title="Repository — working copy, history, branches">📗</button>
+      <button class="act-btn" data-view="connections" title="Connections — GitHub / GitLab accounts">🔌</button>
+    </nav>
+
+    <!-- ============================== EXPLORER ============================== -->
+    <section class="view" id="view-explorer">
+      <div class="page">
+        <h1>🗂️ Explorer</h1>
+        <div class="page-cols">
+          <div>
+            <h3>Recent repositories</h3>
+            <ul class="pick-list" id="ex-recents"></ul>
+
+            <h3>Browse folders</h3>
+            <div class="row" style="margin-bottom:8px">
+              <button class="btn btn-xs" id="ex-up" title="Up one level">↑</button>
+              <input type="text" id="ex-path" placeholder="/path/to/browse" />
+            </div>
+            <div id="ex-open-here"></div>
+            <ul class="pick-list" id="ex-dirs"></ul>
+          </div>
+          <div>
+            <h3>Remote repositories <span class="muted" id="ex-remote-provider"></span></h3>
+            <div id="ex-remote-box">
+              <p class="muted">Connect a provider in <a href="#" id="ex-goto-conn">Connections</a> to list your repos.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================== REPOSITORY ============================ -->
+    <section class="view active" id="view-repo">
+      <div class="layout" id="layout">
+        <aside class="sidebar" id="sidebar">
+          <div class="panel-title">
+            Explorer
+            <button class="btn btn-ghost btn-xs" id="btn-refresh-tree" title="Refresh">↻</button>
+          </div>
+          <div class="tree" id="tree" tabindex="0">
+            <p class="muted pad">No repository open. Pick one in the 🗂️ Explorer view.</p>
+          </div>
+        </aside>
+
+        <main class="center">
+          <nav class="tabs" id="tabs">
+            <button class="tab active" data-tab="graph">Graph</button>
+            <button class="tab" data-tab="file" hidden>File</button>
+            <button class="tab" data-tab="diff" hidden>Diff</button>
+            <button class="tab" data-tab="conflict" hidden>Conflict</button>
+          </nav>
+
+          <section class="tab-content active" id="tab-graph">
+            <div class="graph-wrap" id="graph-wrap"><p class="muted pad">Open a repository to see the graph.</p></div>
+          </section>
+
+          <section class="tab-content" id="tab-file">
+            <div class="file-head">
+              <span id="file-path"></span>
+              <div class="conflict-actions">
+                <span class="muted" id="file-dirty"></span>
+                <button class="btn btn-xs btn-primary" id="btn-save-file">💾 Save</button>
+              </div>
+            </div>
+            <textarea class="conflict-editor" id="file-editor" spellcheck="false"></textarea>
+          </section>
+
+          <section class="tab-content" id="tab-diff">
+            <div class="file-head"><span id="diff-path"></span></div>
+            <div class="diff-view" id="diff-view"></div>
+          </section>
+
+          <section class="tab-content" id="tab-conflict">
+            <div class="conflict-head">
+              <span id="conflict-path"></span>
+              <div class="conflict-actions">
+                <button class="btn btn-xs" id="c-ours">Keep local (ours)</button>
+                <button class="btn btn-xs" id="c-theirs">Keep incoming (theirs)</button>
+                <button class="btn btn-xs btn-primary" id="c-save">💾 Save & mark resolved</button>
+              </div>
+            </div>
+            <textarea class="conflict-editor" id="conflict-editor" spellcheck="false"></textarea>
+          </section>
+        </main>
+
+        <aside class="rightbar" id="rightbar">
+          <div class="merge-banner" id="merge-banner" hidden>
+            <strong>⚠ Merge in progress</strong>
+            <div id="merge-files"></div>
+            <div class="row">
+              <button class="btn btn-xs btn-primary" id="btn-merge-done">Complete merge</button>
+              <button class="btn btn-xs btn-danger" id="btn-merge-abort">Abort</button>
+            </div>
+          </div>
+
+          <details open class="section">
+            <summary>Changes <span class="badge" id="changes-count">0</span></summary>
+            <div class="subsection-title">Staged
+              <button class="btn btn-ghost btn-xs" id="btn-unstage-all" title="Unstage all">⊖ all</button>
+            </div>
+            <ul class="file-list" id="staged-list"></ul>
+            <div class="subsection-title">Unstaged
+              <button class="btn btn-ghost btn-xs" id="btn-stage-all" title="Stage all">⊕ all</button>
+            </div>
+            <ul class="file-list" id="unstaged-list"></ul>
+            <div class="commit-box">
+              <input type="text" id="commit-author" placeholder="Author <email>" title="Commit author" />
+              <span class="muted" id="author-source" style="font-size:10.5px"></span>
+              <textarea id="commit-msg" placeholder="Commit message… (Ctrl+S)"></textarea>
+              <button class="btn btn-primary" id="btn-commit">✔ Commit</button>
+            </div>
+          </details>
+
+          <details open class="section">
+            <summary>Branches</summary>
+            <div class="row pad-h">
+              <input type="text" id="new-branch" placeholder="new-branch" />
+              <button class="btn btn-xs" id="btn-new-branch">＋</button>
+            </div>
+            <ul class="branch-list" id="branch-list"></ul>
+          </details>
+
+          <details open class="section">
+            <summary>History</summary>
+            <ul class="commit-list" id="commit-list"></ul>
+          </details>
+
+          <details class="section">
+            <summary>Stash</summary>
+            <div class="row pad-h">
+              <button class="btn btn-xs" id="btn-stash-push">Save</button>
+              <button class="btn btn-xs" id="btn-stash-apply">Apply</button>
+              <button class="btn btn-xs" id="btn-stash-pop">Pop</button>
+            </div>
+            <ul class="file-list" id="stash-list"></ul>
+          </details>
+
+          <details class="section">
+            <summary>Pull Request / Issues</summary>
+            <div class="pad-h col">
+              <button class="btn" id="btn-create-pr">⇄ Create Pull Request</button>
+              <button class="btn" id="btn-issues">🐛 View issues</button>
+            </div>
+          </details>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ============================== CONNECTIONS =========================== -->
+    <section class="view" id="view-connections">
+      <div class="page">
+        <h1>🔌 Connections</h1>
+        <p class="muted">Tokens are stored encrypted (AES-256-GCM) in <code>~/.git-nd/tokens.enc</code> — never in the browser. They survive restarts.</p>
+        <div class="conn-cards" id="conn-cards"></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <div class="modal" id="modal" role="dialog"></div>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <div class="spinner-overlay" id="spinner" hidden><div class="spinner"></div><span id="spinner-text"></span></div>
+
+  <script type="module" src="/js/app.js"></script>
+</body>
+</html>
