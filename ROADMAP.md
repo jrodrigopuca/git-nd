@@ -12,7 +12,7 @@ Status: `[ ]` pending · `[x]` done.
 
 1. ~~CSRF / localhost hardening~~ ✅ (T1.1)
 2. ~~Hunk staging~~ ✅ (T1.2 — per-line checkboxes still pending)
-3. File watcher auto-refresh (T1.4)
+3. ~~File watcher auto-refresh~~ ✅ (T1.4)
 4. Hybrid native-git backend → SSH + performance (T1.3)
 5. Missing history operations: revert, amend, cherry-pick, tags (T1.5)
 6. Desktop packaging with Tauri (T3.1)
@@ -64,15 +64,17 @@ system `git` binary when detected — `git status --porcelain=v2`,
 Feature-detect at startup; per-operation routing (network + status via native,
 everything else stays isogit until migrated). This unlocks SSH for free.
 
-### T1.4 `[ ]` File-watcher auto-refresh — **S/M**
+### T1.4 `[x]` File-watcher auto-refresh — **S/M** *(shipped)*
 
 **Problem**: edit a file in VS Code and git-nd doesn't notice until you act.
 The app should feel alive like Sourcetree.
 
-**Sketch**: `chokidar` watching the open repo (ignore `.git/objects`,
-`node_modules`), debounce 300ms, broadcast `fs-changed` over the existing
-WebSocket; the frontend already has `refreshAll()`. Watch `.git/HEAD` and
-`.git/refs/**` too, so external `git checkout` is reflected.
+**Shipped**: `server/watcher.js` — chokidar over the working tree (skipping
+`.git` internals and build dirs) plus the state-bearing `.git` files (`HEAD`,
+`refs/`, `index`, `packed-refs`), debounced 350ms server-side into one
+`fs-changed` broadcast, debounced again 250ms client-side before `refreshAll()`.
+Verified: external file edits, `git commit` and `git checkout` from a terminal
+all refresh the UI (Changes list and branch chip) with no user interaction.
 
 ### T1.5 `[ ]` Missing history operations — **M**
 

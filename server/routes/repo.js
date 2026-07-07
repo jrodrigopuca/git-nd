@@ -6,6 +6,7 @@ import os from 'node:os';
 import * as gitSvc from '../gitService.js';
 import { broadcast } from '../state.js';
 import { tokenStore } from '../tokenStore.js';
+import { watchRepo } from '../watcher.js';
 
 export const repoRouter = Router();
 
@@ -39,12 +40,14 @@ repoRouter.get('/api/fs/browse', h(async (req) => {
 /* ---- open / clone ---- */
 repoRouter.post('/api/repo/open', h(async (req) => {
   const dir = gitSvc.openRepo(req.body.dir);
+  await watchRepo(dir);
   broadcast('repo-opened', { dir });
   return gitSvc.repoInfo();
 }));
 
 repoRouter.post('/api/repo/clone', h(async (req) => {
   const dir = await gitSvc.cloneRepo(req.body.url, req.body.dir, tokenStore.tokens());
+  await watchRepo(dir);
   broadcast('repo-opened', { dir });
   return gitSvc.repoInfo();
 }));

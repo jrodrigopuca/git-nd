@@ -40,6 +40,7 @@ The app is organized into three views (activity bar on the left, IDE-style):
 - **PRs / MRs**: list open pull requests (GitHub) / merge requests (GitLab) with source → target branches, and jump to them in the browser. Creating a PR uses branch dropdowns (no typing), shows a live preview of the commits and files the PR would carry (click a file for its line diff), and warns if the source branch hasn't been pushed yet
 - **Stash**: save, apply, pop
 - **GitHub / GitLab**: list your repos (public and private), one-click clone, create Pull/Merge Requests, list and create issues
+- **Live refresh**: a file watcher keeps the UI in sync with external changes — save in your editor or run git in a terminal and the Changes list, branch chip and graph update on their own
 - **UX**: dark/light mode, toasts, spinners, recent repos, real-time events over WebSockets
 
 ## Keyboard shortcuts

@@ -1045,6 +1045,14 @@ document.documentElement.dataset.theme = localStorage.getItem('gitnd-theme') || 
 
 onEvent('file-changed', () => refreshAll());
 
+// External changes (editor saves, terminal git commands) detected by the
+// server-side watcher. Debounced again here: our own operations also trip it.
+let fsRefreshTimer = null;
+onEvent('fs-changed', () => {
+  clearTimeout(fsRefreshTimer);
+  fsRefreshTimer = setTimeout(() => { if (repo) refreshAll(); }, 250);
+});
+
 /* ================================================================= boot === */
 
 (async function boot() {
