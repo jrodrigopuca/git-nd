@@ -129,9 +129,9 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 .conn-card .avatar { width: 38px; height: 38px; border-radius: 50%; }
 
 /* ---------- layout ---------- */
-.layout { flex: 1; display: grid; grid-template-columns: 260px 1fr 320px; min-height: 0; }
+.layout { flex: 1; display: grid; grid-template-columns: 260px 1fr 320px; grid-template-rows: minmax(0, 1fr); min-height: 0; }
 .sidebar { border-right: 1px solid var(--border); background: var(--bg2); display: flex; flex-direction: column; min-width: 0; }
-.center { display: flex; flex-direction: column; min-width: 0; }
+.center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rightbar { border-left: 1px solid var(--border); background: var(--bg2); overflow-y: auto; }
 
 .panel-title {
@@ -173,6 +173,11 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 .tab.active { color: var(--fg); border-bottom-color: var(--accent); }
 .tab-content { display: none; flex: 1; overflow: auto; min-height: 0; }
 .tab-content.active { display: flex; flex-direction: column; }
+/* Tabs whose body is a full-height editor: the textarea scrolls, not the tab.
+   The default .tab-content overflow:auto would give the textarea unbounded
+   height, defeating its internal scroll. */
+#tab-file.active,
+#tab-conflict.active { overflow: hidden; }
 
 /* ---------- file / diff viewers ---------- */
 .file-head, .conflict-head {
@@ -196,7 +201,7 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 
 /* ---------- conflict editor ---------- */
 .conflict-editor {
-  flex: 1; resize: none; border: none; outline: none;
+  flex: 1; min-height: 0; resize: none; border: none; outline: none;
   background: var(--bg); color: var(--fg);
   padding: 12px 16px; font-size: 12.5px; line-height: 1.5;
 }

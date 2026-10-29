@@ -183,15 +183,23 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 
 /* ============================================================== refresh === */
 
-async function refreshAll() {
+async function refreshAll({ loading = false } = {}) {
   if (!repo) return;
-  const [info, status, branches, history, graph] = await Promise.all([
+  const call = Promise.all([
     api.get('/api/repo/info'),
     api.get('/api/repo/status'),
     api.get('/api/repo/branches'),
     api.get('/api/repo/history?depth=80'),
     api.get('/api/repo/history?all=1&depth=100'),
-  ]).catch(() => []);
+  ]);
+  // Only the initial open / boot shows the fullscreen spinner and surfaces
+  // errors. Background refreshes (watcher, post commit/push/stash) stay silent
+  // to avoid covering the screen and clobbering another operation's spinner.
+  const result = loading
+    ? await withUi(call, { loading: 'Loading repository…' })
+    : await call.catch(() => null);
+  if (!result) return;
+  const [info, status, branches, history, graph] = result;
   if (!info) return;
   repo = info;
 
@@ -760,6 +768,15 @@ function setDirty(dirty) {
 }
 
 async function openFile(path) {
+  // Reopening the same file with unsaved edits: don't reload (it would discard
+  // them). Just make sure the File tab is visible.
+  if (fileDirty && currentFile === path) { showTab('file'); return; }
+  // Switching to a different file with unsaved edits would silently discard
+  // them: ask first.
+  if (fileDirty && currentFile && currentFile !== path) {
+    const ok = await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and open "${path}"?`);
+    if (!ok) return;
+  }
   const file = await withUi(api.get(`/api/repo/file?path=${encodeURIComponent(path)}`));
   if (!file) return;
   const editor = $('file-editor');
@@ -784,6 +801,20 @@ async function saveFile() {
 
 $('file-editor').addEventListener('input', () => setDirty(true));
 $('btn-save-file').addEventListener('click', saveFile);
+
+/** Close the File tab: clear state and hide the tab (it is revealed again on open). */
+function closeFile() {
+  currentFile = null;
+  setDirty(false);
+  $('file-editor').value = '';
+  $('file-path').textContent = '';
+  document.querySelector('.tab[data-tab="file"]').hidden = true;
+  showTab('graph');
+}
+$('btn-close-file').addEventListener('click', async () => {
+  if (fileDirty && !(await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Close anyway?`))) return;
+  closeFile();
+});
 
 /** Working-copy diff split into hunks with stage/unstage/discard per hunk. */
 async function showWorkdirDiff(path, staged) {
@@ -856,7 +887,7 @@ async function openRepo(dir) {
   closeModal();
   toast(`Repository opened: ${info.name}`, 'success');
   loadAuthor();
-  refreshAll();
+  refreshAll({ loading: true });
   switchView('repo');
   showTab('graph');
 }
@@ -1124,7 +1155,7 @@ onEvent('fs-changed', () => {
   try {
     repo = await api.get('/api/repo/info');
     loadAuthor();
-    refreshAll();
+    refreshAll({ loading: true });
     switchView('repo');
   } catch {
     switchView('explorer'); // nothing open → start where you pick a repo

@@ -59,6 +59,8 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
   const row = new Map(commits.map((c, i) => [c.oid, i]));
   const textX = maxLanes * COL_W + 20;
   const width = Math.max(600, textX + 640);
+  const META_W = 150;            // reserved width for "hash · date" at the right edge
+  const metaX = width - META_W;  // left boundary of the meta zone (message must not cross it)
   const height = commits.length * ROW_H + 10;
 
   const svg = svgEl('svg', { width, height, viewBox: `0 0 ${width} ${height}` });
@@ -143,10 +145,31 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
       x += w + 6;
     }
 
+    // Fit the message into the real space left before the meta zone, so long
+    // messages + branch chips never overlap the hash/date column.
+    const AVG_CHAR_PX = 6.6; // approx glyph width for the message font
+    const avail = metaX - 10 - x;
+    const firstLine = c.message.split('\n')[0];
     const msg = svgEl('text', { x, y: cy(i) + 4, class: 'graph-msg' });
-    msg.textContent = c.message.split('\n')[0].slice(0, 70);
-    // Author lives in the avatar; keep the meta line lean.
-    const meta = svgEl('text', { x: textX + 480, y: cy(i) + 4, class: 'graph-meta' });
+    if (avail < 2 * AVG_CHAR_PX) {
+      // No room (chips already reached the meta zone): hide the message, keep
+      // the full text in a tooltip — same pattern the branch chips use.
+      const tip = svgEl('title', {});
+      tip.textContent = firstLine;
+      msg.append(tip);
+    } else {
+      const maxChars = Math.floor(avail / AVG_CHAR_PX);
+      const truncated = firstLine.length > maxChars;
+      msg.textContent = truncated ? `${firstLine.slice(0, maxChars - 1)}…` : firstLine;
+      if (truncated) {
+        const tip = svgEl('title', {});
+        tip.textContent = firstLine;
+        msg.append(tip);
+      }
+    }
+    // Author lives in the avatar; keep the meta line lean. Anchored to the
+    // right edge so it stays put regardless of message/chip length.
+    const meta = svgEl('text', { x: width - 10, y: cy(i) + 4, 'text-anchor': 'end', class: 'graph-meta' });
     meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
     g.append(msg, meta);
     if (onSelect) g.addEventListener('click', () => onSelect(c));
