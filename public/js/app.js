@@ -185,13 +185,18 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 
 async function refreshAll() {
   if (!repo) return;
-  const [info, status, branches, history, graph] = await Promise.all([
-    api.get('/api/repo/info'),
-    api.get('/api/repo/status'),
-    api.get('/api/repo/branches'),
-    api.get('/api/repo/history?depth=80'),
-    api.get('/api/repo/history?all=1&depth=100'),
-  ]).catch(() => []);
+  const result = await withUi(
+    Promise.all([
+      api.get('/api/repo/info'),
+      api.get('/api/repo/status'),
+      api.get('/api/repo/branches'),
+      api.get('/api/repo/history?depth=80'),
+      api.get('/api/repo/history?all=1&depth=100'),
+    ]),
+    { loading: 'Loading repository…' },
+  );
+  if (!result) return;
+  const [info, status, branches, history, graph] = result;
   if (!info) return;
   repo = info;
 
@@ -760,6 +765,11 @@ function setDirty(dirty) {
 }
 
 async function openFile(path) {
+  // Switching files with unsaved edits would silently discard them: ask first.
+  if (fileDirty && currentFile && currentFile !== path) {
+    const ok = await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and open "${path}"?`);
+    if (!ok) return;
+  }
   const file = await withUi(api.get(`/api/repo/file?path=${encodeURIComponent(path)}`));
   if (!file) return;
   const editor = $('file-editor');
@@ -784,6 +794,20 @@ async function saveFile() {
 
 $('file-editor').addEventListener('input', () => setDirty(true));
 $('btn-save-file').addEventListener('click', saveFile);
+
+/** Close the File tab: clear state and hide the tab (it is revealed again on open). */
+function closeFile() {
+  currentFile = null;
+  setDirty(false);
+  $('file-editor').value = '';
+  $('file-path').textContent = '';
+  document.querySelector('.tab[data-tab="file"]').hidden = true;
+  showTab('graph');
+}
+$('btn-close-file').addEventListener('click', async () => {
+  if (fileDirty && !(await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Close anyway?`))) return;
+  closeFile();
+});
 
 /** Working-copy diff split into hunks with stage/unstage/discard per hunk. */
 async function showWorkdirDiff(path, staged) {
