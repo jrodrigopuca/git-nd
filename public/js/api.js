@@ -36,7 +36,9 @@ export async function withUi(promise, { loading, success } = {}) {
     toast(err.message, 'error');
     return null;
   } finally {
-    spinner.hidden = true;
+    // Only hide the spinner this call showed: a call without `loading` must not
+    // clobber the spinner of another operation still in flight (e.g. a pull).
+    if (loading) spinner.hidden = true;
   }
 }
 

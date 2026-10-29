@@ -879,9 +879,21 @@ async function showDiff(path, oid, base) {
 
 /* =========================================================== open/clone === */
 
+/**
+ * Switching repository with a file open: unsaved edits would be orphaned, and
+ * currentFile (a path relative to the OLD repo) would make Ctrl+S write into
+ * the new one. Ask before switching; returns false to abort.
+ */
+async function confirmLeaveFile() {
+  if (!fileDirty) return true;
+  return confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and switch repository?`);
+}
+
 async function openRepo(dir) {
+  if (!(await confirmLeaveFile())) return;
   const info = await withUi(api.post('/api/repo/open', { dir }), { loading: 'Opening repository…' });
   if (!info) return;
+  closeFile();
   repo = info;
   addRecent(info.dir);
   closeModal();
@@ -892,7 +904,9 @@ async function openRepo(dir) {
   showTab('graph');
 }
 
-function cloneModal(prefillUrl = '') {
+async function cloneModal(prefillUrl = '') {
+  // Asked up front: confirmModal shares the single modal and would wipe the form.
+  if (!(await confirmLeaveFile())) return;
   const url = el('input', { type: 'text', placeholder: 'https://github.com/user/repo.git', value: prefillUrl });
   const dest = el('input', { type: 'text', placeholder: '(optional) target directory' });
   const go = async () => {
@@ -902,6 +916,7 @@ function cloneModal(prefillUrl = '') {
       { loading: 'Cloning… this may take a while', success: 'Repository cloned ✔' },
     );
     if (info) {
+      closeFile();
       repo = info;
       addRecent(info.dir);
       closeModal();

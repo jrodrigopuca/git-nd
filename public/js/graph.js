@@ -117,46 +117,62 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
     g.append(av);
 
     let x = textX + 26;
-    for (const t of (tips[c.oid] || [])) {
-      // Long branch names (dependabot/…) get truncated; full name in tooltip.
-      const raw = t.tag ? `🏷 ${t.name}` : t.name;
-      const shown = raw.length > 24 ? `${raw.slice(0, 11)}…${raw.slice(-11)}` : raw;
+    const chipLimit = metaX - 10; // chips must not cross into the hash/date column
+    const drawChip = (shown, tooltip, { color, current = false, remote = false }) => {
       const w = labelWidth(shown);
-      const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent)' : COLORS[lane.get(c.oid) % COLORS.length];
       const chip = svgEl('g', {});
       chip.append(svgEl('rect', {
         x, y: cy(i) - 9, width: w, height: 18, rx: 9,
-        fill: t.current ? color : 'transparent',
+        fill: current ? color : 'transparent',
         stroke: color, 'stroke-width': 1.2,
-        'stroke-dasharray': t.remote ? '3,2' : 'none',
+        'stroke-dasharray': remote ? '3,2' : 'none',
       }));
       const label = svgEl('text', {
         x: x + w / 2, y: cy(i) + 3.5, 'text-anchor': 'middle',
-        style: `font-size:10.5px; fill: ${t.current ? 'var(--accent-fg)' : 'var(--fg)'}`,
+        style: `font-size:10.5px; fill: ${current ? 'var(--accent-fg)' : 'var(--fg)'}`,
       });
       label.textContent = shown;
       chip.append(label);
-      if (shown !== raw) {
+      if (tooltip) {
         const tip = svgEl('title', {});
-        tip.textContent = t.name;
+        tip.textContent = tooltip;
         chip.append(tip);
       }
       g.append(chip);
       x += w + 6;
+    };
+    const rowTips = tips[c.oid] || [];
+    for (let k = 0; k < rowTips.length; k++) {
+      const t = rowTips[k];
+      // Long branch names (dependabot/…) get truncated; full name in tooltip.
+      const raw = t.tag ? `🏷 ${t.name}` : t.name;
+      const shown = raw.length > 24 ? `${raw.slice(0, 11)}…${raw.slice(-11)}` : raw;
+      // If more chips follow, keep room for the "+N" overflow chip.
+      const reserve = k < rowTips.length - 1 ? labelWidth('+99') + 6 : 0;
+      if (x + labelWidth(shown) > chipLimit - reserve) {
+        // Too many refs on this commit: collapse the rest into "+N", names in tooltip.
+        const rest = rowTips.slice(k);
+        drawChip(`+${rest.length}`, rest.map((r) => r.name).join('\n'), { color: 'var(--muted)' });
+        break;
+      }
+      const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent)' : COLORS[lane.get(c.oid) % COLORS.length];
+      drawChip(shown, shown !== raw ? t.name : null, { color, current: t.current, remote: t.remote });
     }
 
     // Fit the message into the real space left before the meta zone, so long
     // messages + branch chips never overlap the hash/date column.
     const AVG_CHAR_PX = 6.6; // approx glyph width for the message font
+    const MIN_MSG_CHARS = 5; // below this a stub like "a…" says nothing: hide it
     const avail = metaX - 10 - x;
     const firstLine = c.message.split('\n')[0];
     const msg = svgEl('text', { x, y: cy(i) + 4, class: 'graph-msg' });
-    if (avail < 2 * AVG_CHAR_PX) {
-      // No room (chips already reached the meta zone): hide the message, keep
-      // the full text in a tooltip — same pattern the branch chips use.
+    if (avail < MIN_MSG_CHARS * AVG_CHAR_PX) {
+      // No room: hide the message. The tooltip goes on the ROW, not on the
+      // empty <text> — an SVG text with no glyphs has no hover area at all.
+      // Inner <title>s (avatar, chips) still win over it where they apply.
       const tip = svgEl('title', {});
       tip.textContent = firstLine;
-      msg.append(tip);
+      g.append(tip);
     } else {
       const maxChars = Math.floor(avail / AVG_CHAR_PX);
       const truncated = firstLine.length > maxChars;
