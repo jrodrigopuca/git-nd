@@ -45,6 +45,9 @@ repoRouter.post('/api/repo/open', h(async (req) => {
   return gitSvc.repoInfo();
 }));
 
+repoRouter.get('/api/repo/clone-target', h((req) =>
+  gitSvc.cloneTargetInfo(req.query.url || '', req.query.dir || '')));
+
 repoRouter.post('/api/repo/clone', h(async (req) => {
   const dir = await gitSvc.cloneRepo(req.body.url, req.body.dir, tokenStore.tokens());
   await watchRepo(dir);

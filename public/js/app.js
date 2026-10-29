@@ -205,6 +205,8 @@ async function refreshAll({ loading = false } = {}) {
 
   $('repo-chip').hidden = false;
   $('repo-name').textContent = `📂 ${info.name}`;
+  // Full path on hover: after a clone or open, "where is this repo?" is one hover away.
+  $('repo-name').title = `${info.dir}\nClick to switch repository (Explorer)`;
   $('branch-name').textContent = info.branch;
 
   renderChanges(status);
@@ -982,14 +984,39 @@ async function cloneModal(prefillUrl = '') {
   // Asked up front: confirmModal shares the single modal and would wipe the form.
   if (!(await confirmLeaveFile())) return;
   const url = el('input', { type: 'text', placeholder: 'https://github.com/user/repo.git', value: prefillUrl });
-  const dest = el('input', { type: 'text', placeholder: '(optional) target directory' });
+  const dest = el('input', { type: 'text', placeholder: '(optional) folder — relative paths go under ~/git-nd-repos' });
+  // Live preview of the exact destination, resolved by the server with the
+  // same rule it uses to clone — so "where did it go?" is answered up front.
+  const where = el('p', { class: 'muted', style: 'margin:4px 0 0; word-break:break-all' });
+  const cloneBtn = el('button', { class: 'btn btn-primary', onclick: () => go() }, 'Clone');
+  let previewSeq = 0;
+  let previewTimer = null;
+  const updatePreview = () => {
+    clearTimeout(previewTimer);
+    previewTimer = setTimeout(async () => {
+      const seq = ++previewSeq;
+      if (!url.value.trim() && !dest.value.trim()) { where.textContent = ''; return; }
+      const q = `url=${encodeURIComponent(url.value.trim())}&dir=${encodeURIComponent(dest.value.trim())}`;
+      const t = await api.get(`/api/repo/clone-target?${q}`).catch(() => null);
+      if (seq !== previewSeq || !t) return; // a newer keystroke already asked
+      where.textContent = t.notEmpty
+        ? `⚠ ${t.dir} already exists and is not empty — choose another folder`
+        : `Will be cloned into: ${t.dir}`;
+      cloneBtn.disabled = t.notEmpty;
+    }, 200);
+  };
+  url.addEventListener('input', updatePreview);
+  dest.addEventListener('input', updatePreview);
+  updatePreview();
+
   const go = async () => {
     if (!url.value.trim()) return;
     const info = await withUi(
       api.post('/api/repo/clone', { url: url.value.trim(), dir: dest.value.trim() || undefined }),
-      { loading: 'Cloning… this may take a while', success: 'Repository cloned ✔' },
+      { loading: 'Cloning… this may take a while' },
     );
     if (info) {
+      toast(`Repository cloned into ${info.dir} ✔`, 'success', 6000);
       closeFile();
       repo = info;
       addRecent(info.dir);
@@ -1003,10 +1030,10 @@ async function cloneModal(prefillUrl = '') {
   openModal(
     el('h2', {}, '⬇ Clone repository'),
     el('div', {}, el('label', {}, 'URL'), url),
-    el('div', {}, el('label', {}, 'Target'), dest),
+    el('div', {}, el('label', {}, 'Target'), dest, where),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
-      el('button', { class: 'btn btn-primary', onclick: go }, 'Clone'),
+      cloneBtn,
     ),
   );
 }

@@ -59,13 +59,35 @@ export function openRepo(dir) {
   return repoState.open(dir);
 }
 
-export async function cloneRepo(url, targetDir, tokens) {
-  let dir = targetDir;
-  if (!dir) {
-    const name = url.split('/').pop().replace(/\.git$/, '') || 'repo';
-    dir = path.join(os.homedir(), 'git-nd-repos', name);
+const CLONE_BASE = path.join(os.homedir(), 'git-nd-repos');
+
+/**
+ * Absolute folder a clone will land in. The UI previews it with this same
+ * function, so what the user sees is exactly where the clone goes.
+ * - empty target    → ~/git-nd-repos/<repo name from the URL>
+ * - "~" or "~/x"    → under the home directory
+ * - relative target → under ~/git-nd-repos (NOT the server's working
+ *                     directory, which is wherever `npm start` was run)
+ */
+export function cloneTarget(url, targetDir) {
+  const raw = (targetDir || '').trim();
+  if (!raw) {
+    const name = (url || '').trim().replace(/\/+$/, '').split(/[/:]/).pop().replace(/\.git$/, '') || 'repo';
+    return path.join(CLONE_BASE, name);
   }
-  dir = path.resolve(dir);
+  const expanded = raw === '~' || raw.startsWith('~/') ? path.join(os.homedir(), raw.slice(1)) : raw;
+  return path.resolve(CLONE_BASE, expanded);
+}
+
+/** Preview for the clone dialog: where it goes and whether that would fail. */
+export function cloneTargetInfo(url, targetDir) {
+  const dir = cloneTarget(url, targetDir);
+  const notEmpty = fs.existsSync(dir) && fs.readdirSync(dir).length > 0;
+  return { dir, notEmpty };
+}
+
+export async function cloneRepo(url, targetDir, tokens) {
+  const dir = cloneTarget(url, targetDir);
   if (fs.existsSync(dir) && fs.readdirSync(dir).length > 0) {
     throw new AppError(`Target directory is not empty: ${dir}`, 400);
   }
