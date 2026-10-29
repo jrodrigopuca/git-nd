@@ -185,6 +185,7 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 
 async function refreshAll({ loading = false } = {}) {
   if (!repo) return;
+  const graphEpoch = graph.epoch; // the graph state this refresh's page request is based on
   const call = Promise.all([
     api.get('/api/repo/info'),
     api.get('/api/repo/status'),
@@ -213,7 +214,7 @@ async function refreshAll({ loading = false } = {}) {
   renderMergeBanner(info.merge);
   renderBranches(branches);
   renderHistory(history);
-  renderGraphTab(graphPage);
+  renderGraphTab(graphPage, graphEpoch);
   setStatusMap(status.files);
   await refreshTree();
   refreshStash();
@@ -412,7 +413,11 @@ function renderHistory(commits) {
 /* Paged graph (docs/adr/0001): first page with the refresh, "Load more" for
    the next ones, tags fetched once per walk and applied on top. */
 const GRAPH_PAGE = 200;
-const graph = { dir: null, walkId: null, view: null, loaded: 0, done: true, busy: false };
+// `epoch` grows on every change to what the graph shows (new first page, a
+// page appended). A response requested at an older epoch is stale: applying
+// it could undo newer state — e.g. a watcher refresh asked for 1,000 rows
+// while a reload of 1,200 was in flight, landed last, and dropped 200 rows.
+const graph = { dir: null, walkId: null, view: null, loaded: 0, done: true, busy: false, epoch: 0 };
 
 /**
  * First-page request for refreshAll. Same repo + known walk → the server
@@ -426,19 +431,34 @@ function graphRequestUrl() {
   return `/api/repo/graph?limit=${limit}${sameRepo ? `&known=${graph.walkId}` : ''}`;
 }
 
-function renderGraphTab(page) {
+/** Re-request the first pages from the CURRENT state (after dropping a stale response). */
+async function reloadGraph() {
+  const epoch = graph.epoch;
+  const page = await api.get(graphRequestUrl()).catch(() => null);
+  renderGraphTab(page, epoch);
+}
+
+/** Apply a first-page response requested at `epoch` (omit it for an unconditional render). */
+function renderGraphTab(page, epoch) {
   if (!page || page.unchanged) return;
+  if (epoch !== undefined && epoch !== graph.epoch) {
+    // Stale. If it carried refs we are not showing, ask again from the current state.
+    if (page.walkId !== graph.walkId) reloadGraph();
+    return;
+  }
   const wrap = $('graph-wrap');
   const scrollTop = graph.dir === repo.dir ? wrap.scrollTop : 0;
   Object.assign(graph, {
     dir: repo.dir, walkId: page.walkId, loaded: page.commits.length, done: page.done, busy: false,
   });
+  graph.epoch++;
+  graph.view?.destroy(); // stop the old view's scroll/resize listeners
   if (!page.commits.length) {
     graph.view = null;
     wrap.replaceChildren(el('p', { class: 'muted' }, 'No commits.'));
     return;
   }
-  graph.view = new GraphView({ onSelect: commitActions });
+  graph.view = new GraphView({ onSelect: commitActions, scroller: wrap });
   wrap.replaceChildren(
     graph.view.reset(page.commits, { tips: page.tips, headOid: page.headOid }),
     el('div', { class: 'graph-footer', id: 'graph-footer' }),
@@ -463,18 +483,19 @@ async function loadMoreGraph() {
   if (graph.busy || graph.done || !graph.view) return;
   graph.busy = true;
   renderGraphFooter();
-  const { walkId, loaded } = graph;
+  const { walkId, loaded, epoch } = graph;
   try {
     const page = await api.get(`/api/repo/graph?walk=${walkId}&offset=${loaded}&limit=${GRAPH_PAGE}`);
-    if (graph.walkId !== walkId) return; // a refresh replaced the graph meanwhile
+    if (graph.epoch !== epoch) return; // a refresh replaced the graph meanwhile
     graph.view.append(page.commits);
     graph.loaded += page.commits.length;
     graph.done = page.done;
+    graph.epoch++;
   } catch (err) {
     if (err.status === 409) {
       // Branches moved since the first page: reload what was shown plus one page.
       const page = await api.get(`/api/repo/graph?limit=${loaded + GRAPH_PAGE}`).catch(() => null);
-      if (page) { renderGraphTab(page); return; }
+      if (page) { renderGraphTab(page, epoch); return; }
     }
     toast(err.message, 'error');
   } finally {

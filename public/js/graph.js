@@ -1,8 +1,9 @@
 const COLORS = ['#4f9cf9', '#4dbd74', '#d8b04c', '#e5605e', '#b57edc', '#5bc8c4', '#e08e4e'];
 const ROW_H = 28;
 const COL_W = 16;
-const LANE_HEADROOM = 4; // spare lanes so later pages rarely force a re-layout
+const LANE_HEADROOM = 4; // spare lanes so later pages rarely move the text column
 const META_W = 150;      // reserved width for "hash · date" at the right edge
+const OVERSCAN = 20;     // rows drawn above and below the viewport
 
 const svgEl = (tag, attrs) => {
   const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -28,19 +29,28 @@ function initials(name) {
 }
 
 /**
- * Commit graph that grows page by page (docs/adr/0001). Rows arrive in the
- * server's append-only order, so:
- * - lanes continue from where the previous page left them (same single
- *   top-to-bottom sweep as before, just resumable);
- * - an edge to a parent not loaded yet is a dashed stub, replaced by the real
- *   edge when that parent arrives on a later page;
- * - tags arrive after the first page and redraw only the rows they touch.
- * Only when the lanes outgrow the reserved width is everything laid out again.
+ * Commit graph that grows page by page and draws only what is on screen
+ * (docs/adr/0001).
+ *
+ * Model (all loaded commits, cheap): rows in the server's append-only order,
+ * lanes from a resumable top-to-bottom sweep, and edges child → parent.
+ * An edge to a parent not loaded yet is drawn as a dashed stub until that
+ * parent arrives on a later page.
+ *
+ * View (virtualized): the SVG keeps the full height, so the scrollbar is
+ * honest, but only rows in the viewport ± OVERSCAN, and the edges crossing
+ * that band, are in the DOM. Drawing 14k rows as DOM made each "Load more"
+ * cost 2.6 s in the browser; now the DOM size does not depend on history size.
  */
 export class GraphView {
-  constructor({ onSelect } = {}) {
+  /** @param {{ onSelect?: (c) => void, scroller: HTMLElement }} opts — scroller: the element that scrolls */
+  constructor({ onSelect, scroller } = {}) {
     this.onSelect = onSelect;
+    this.scroller = scroller;
     this.element = document.createElement('div');
+    this.frame = 0;
+    this.onScroll = () => this.schedule();
+    this.resizeObserver = new ResizeObserver(() => this.schedule()); // also fires when the tab becomes visible
   }
 
   /** Start over with a first page. */
@@ -48,59 +58,123 @@ export class GraphView {
     this.branchTips = tips;     // oid → [{ name, remote, current }]
     this.tagTips = {};          // oid → [{ name, tag: true }]
     this.headOid = headOid;
-    this.layout(commits, null);
-    return this.element;
-  }
-
-  /** Add the next page below the rows already drawn. */
-  append(commits) {
-    const before = this.commits.length;
-    this.place(commits);
-    if (this.lanesUsed > this.reservedLanes) this.layout(this.commits, null); // rare: re-layout all
-    else this.resize();
-    return this.commits.length - before;
-  }
-
-  /** Tags (`{ oid: [name] }`): redraw the loaded rows they touch; later pages pick them up. */
-  setTags(tags) {
-    this.tagTips = {};
-    for (const [oid, names] of Object.entries(tags)) this.tagTips[oid] = names.map((name) => ({ name, tag: true }));
-    for (const oid of Object.keys(this.tagTips)) {
-      const old = this.rowEls.get(oid);
-      if (old) old.replaceWith(this.renderRow(this.commits[this.row.get(oid)], this.row.get(oid)));
-    }
-  }
-
-  get size() { return this.commits.length; }
-
-  /* ---- internals ---- */
-
-  layout(commits, reserved) {
     this.commits = [];
     this.lane = new Map();
     this.row = new Map();
-    this.rowEls = new Map();
-    this.active = [];        // active[i] = oid expected next on lane i
+    this.active = [];           // active[i] = oid expected next on lane i
     this.lanesUsed = 1;
-    this.pending = new Map(); // parent oid → [{ child, stub }] edges waiting for that parent
+    this.edges = [];            // { key, child, parent } once both rows exist
+    this.waiting = new Map();   // parent oid not loaded yet → [child oid]
+    this.drawnRows = new Map(); // row index → <g>
+    this.drawnEdges = new Map(); // key → <path>
 
-    // Lanes first (cheap, no DOM) to size the lane column before drawing.
-    const probe = new Map();
-    const active = [];
-    let used = 1;
-    // `probe` doubles as the "placed" set: it holds every commit swept so far.
-    for (const c of commits) used = Math.max(used, this.assignLane(c, active, probe, probe));
-    this.reservedLanes = reserved ?? used + LANE_HEADROOM;
-
-    this.textX = this.reservedLanes * COL_W + 20;
-    this.width = Math.max(600, this.textX + 640);
-    this.metaX = this.width - META_W;
     this.svg = svgEl('svg', {});
     this.edgesLayer = svgEl('g', {});
     this.rowsLayer = svgEl('g', {});
     this.svg.append(this.edgesLayer, this.rowsLayer);
     this.element.replaceChildren(this.svg);
+
     this.place(commits);
+    this.setTextColumn(this.lanesUsed + LANE_HEADROOM);
+    this.attach();
+    this.update(); // synchronous first draw: the page is visible right away
+    return this.element;
+  }
+
+  /** Add the next page below the rows already loaded. */
+  append(commits) {
+    const before = this.commits.length;
+    this.place(commits);
+    if (this.lanesUsed > this.reservedLanes) {
+      // Lanes outgrew the reserved column: move the text, redraw visible rows.
+      this.setTextColumn(this.lanesUsed + LANE_HEADROOM);
+      for (const g of this.drawnRows.values()) g.remove();
+      this.drawnRows.clear();
+    }
+    this.resize();
+    this.update();
+    return this.commits.length - before;
+  }
+
+  /** Tags (`{ oid: [name] }`): visible rows are redrawn now, the rest when scrolled into view. */
+  setTags(tags) {
+    this.tagTips = {};
+    for (const [oid, names] of Object.entries(tags)) this.tagTips[oid] = names.map((name) => ({ name, tag: true }));
+    for (const [i, g] of this.drawnRows) {
+      const fresh = this.drawRow(i);
+      g.replaceWith(fresh);
+      this.drawnRows.set(i, fresh); // keep the registry pointing at what is in the DOM
+    }
+  }
+
+  /** Stop listening (the view is being replaced). */
+  destroy() {
+    this.scroller?.removeEventListener('scroll', this.onScroll);
+    this.resizeObserver.disconnect();
+    cancelAnimationFrame(this.frame);
+  }
+
+  get size() { return this.commits.length; }
+
+  /* ---- model ---- */
+
+  /** Lanes + edges for new commits. No DOM. */
+  place(commits) {
+    for (const c of commits) {
+      const i = this.commits.length;
+      this.commits.push(c);
+      this.row.set(c.oid, i);
+      this.lanesUsed = Math.max(this.lanesUsed, this.assignLane(c));
+      for (const p of c.parents) {
+        // Parent already above (clock skew): the edge exists now. Otherwise it
+        // is created when the parent's row arrives (children are seen first).
+        if (this.row.has(p)) this.edges.push({ key: `${c.oid}>${p}`, child: c.oid, parent: p });
+      }
+      for (const childOid of this.waiting.get(c.oid) || []) {
+        this.edges.push({ key: `${childOid}>${c.oid}`, child: childOid, parent: c.oid });
+      }
+      this.waiting.delete(c.oid);
+      for (const p of c.parents) {
+        if (this.row.has(p)) continue;
+        if (!this.waiting.has(p)) this.waiting.set(p, []);
+        this.waiting.get(p).push(c.oid);
+      }
+    }
+  }
+
+  /**
+   * One step of the active-lanes sweep. A parent already placed (clock skew
+   * put it above its child) is not reserved: it would hold a lane open down
+   * to the bottom of the graph.
+   */
+  assignLane(c) {
+    const { active } = this;
+    let li = active.indexOf(c.oid);
+    if (li === -1) {
+      li = active.indexOf(null);
+      if (li === -1) { active.push(null); li = active.length - 1; }
+    }
+    for (let i = 0; i < active.length; i++) {
+      if (active[i] === c.oid && i !== li) active[i] = null; // merged lanes close here
+    }
+    this.lane.set(c.oid, li);
+    const [first, ...others] = c.parents;
+    active[li] = first && !this.row.has(first) ? first : null;
+    for (const p of others) {
+      if (this.row.has(p) || active.includes(p)) continue;
+      const free = active.indexOf(null);
+      if (free === -1) active.push(p); else active[free] = p;
+    }
+    return Math.max(1, active.length);
+  }
+
+  /* ---- view ---- */
+
+  setTextColumn(lanes) {
+    this.reservedLanes = lanes;
+    this.textX = lanes * COL_W + 20;
+    this.width = Math.max(600, this.textX + 640);
+    this.metaX = this.width - META_W;
     this.resize();
   }
 
@@ -111,59 +185,73 @@ export class GraphView {
     this.svg.setAttribute('viewBox', `0 0 ${this.width} ${height}`);
   }
 
-  /**
-   * One step of the active-lanes sweep for commit `c`. A parent already placed
-   * (clock skew put it above its child) is not reserved: it would hold a lane
-   * open down to the bottom of the graph.
-   */
-  assignLane(c, active, lane, placed) {
-    let li = active.indexOf(c.oid);
-    if (li === -1) {
-      li = active.indexOf(null);
-      if (li === -1) { active.push(null); li = active.length - 1; }
-    }
-    for (let i = 0; i < active.length; i++) {
-      if (active[i] === c.oid && i !== li) active[i] = null; // merged lanes close here
-    }
-    lane.set(c.oid, li);
-    const [first, ...others] = c.parents;
-    active[li] = first && !placed.has(first) ? first : null;
-    for (const p of others) {
-      if (placed.has(p) || active.includes(p)) continue;
-      const free = active.indexOf(null);
-      if (free === -1) active.push(p); else active[free] = p;
-    }
-    return Math.max(1, active.length);
+  attach() {
+    if (!this.scroller) return;
+    this.scroller.addEventListener('scroll', this.onScroll, { passive: true });
+    this.resizeObserver.observe(this.scroller);
   }
 
-  place(commits) {
-    for (const c of commits) {
-      const i = this.commits.length;
-      this.commits.push(c);
-      this.row.set(c.oid, i);
-      this.lanesUsed = Math.max(this.lanesUsed, this.assignLane(c, this.active, this.lane, this.row));
+  schedule() {
+    if (!this.frame) this.frame = requestAnimationFrame(() => { this.frame = 0; this.update(); });
+  }
 
-      for (const p of c.parents) {
-        if (this.row.has(p)) this.edgesLayer.append(this.edge(c.oid, p)); // parent above (skew)
-        else {
-          const stub = this.stub(c.oid);
-          this.edgesLayer.append(stub);
-          if (!this.pending.has(p)) this.pending.set(p, []);
-          this.pending.get(p).push({ child: c.oid, stub });
-        }
+  /** Row indexes to draw: viewport ± OVERSCAN (first rows if not measurable yet). */
+  visibleRange() {
+    const n = this.commits.length;
+    const sc = this.scroller;
+    if (!sc || !sc.clientHeight || !this.svg.isConnected) return [0, Math.min(n, 2 * OVERSCAN) - 1];
+    const svgTop = this.svg.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+    const y0 = sc.scrollTop - svgTop;
+    const y1 = y0 + sc.clientHeight;
+    // Row r occupies [4 + r*ROW_H, 32 + r*ROW_H] (cy = 18 + r*ROW_H ± ROW_H/2).
+    const first = Math.max(0, Math.floor((y0 - 4) / ROW_H) - OVERSCAN);
+    const last = Math.min(n - 1, Math.ceil((y1 - 4) / ROW_H) + OVERSCAN);
+    return [first, last];
+  }
+
+  /** Bring the DOM in line with the visible range: add what entered, drop what left. */
+  update() {
+    if (!this.commits.length) return;
+    const [first, last] = this.visibleRange();
+
+    for (const [i, g] of this.drawnRows) {
+      if (i < first || i > last) { g.remove(); this.drawnRows.delete(i); }
+    }
+    for (let i = first; i <= last; i++) {
+      if (!this.drawnRows.has(i)) {
+        const g = this.drawRow(i);
+        this.rowsLayer.append(g);
+        this.drawnRows.set(i, g);
       }
-      for (const { child, stub } of this.pending.get(c.oid) || []) stub.replaceWith(this.edge(child, c.oid));
-      this.pending.delete(c.oid);
+    }
 
-      const g = this.renderRow(c, i);
-      this.rowsLayer.append(g);
+    // Edges crossing the band (a long lane line can start far above it), plus
+    // stubs for visible rows whose parent is not loaded yet.
+    const wanted = new Map();
+    for (const e of this.edges) {
+      const a = this.row.get(e.child);
+      const b = this.row.get(e.parent);
+      if (Math.max(a, b) >= first && Math.min(a, b) <= last) wanted.set(e.key, e);
+    }
+    for (let i = first; i <= last; i++) {
+      const c = this.commits[i];
+      for (const p of c.parents) if (!this.row.has(p)) wanted.set(`stub:${c.oid}>${p}`, { stub: c.oid });
+    }
+    for (const [key, path] of this.drawnEdges) {
+      if (!wanted.has(key)) { path.remove(); this.drawnEdges.delete(key); }
+    }
+    for (const [key, e] of wanted) {
+      if (this.drawnEdges.has(key)) continue;
+      const path = e.stub ? this.drawStub(e.stub) : this.drawEdge(e.child, e.parent);
+      this.edgesLayer.append(path);
+      this.drawnEdges.set(key, path);
     }
   }
 
   cx(l) { return 10 + l * COL_W; }
   cy(r) { return 18 + r * ROW_H; }
 
-  edge(childOid, parentOid) {
+  drawEdge(childOid, parentOid) {
     const [x1, y1] = [this.cx(this.lane.get(childOid)), this.cy(this.row.get(childOid))];
     const [x2, y2] = [this.cx(this.lane.get(parentOid)), this.cy(this.row.get(parentOid))];
     const d = x1 === x2
@@ -176,7 +264,7 @@ export class GraphView {
   }
 
   /** Parent not loaded yet: short dashed line going down. */
-  stub(childOid) {
+  drawStub(childOid) {
     const [x, y] = [this.cx(this.lane.get(childOid)), this.cy(this.row.get(childOid))];
     return svgEl('path', {
       d: `M${x},${y} L${x},${y + ROW_H * 0.7}`,
@@ -185,7 +273,8 @@ export class GraphView {
     });
   }
 
-  renderRow(c, i) {
+  drawRow(i) {
+    const c = this.commits[i];
     const { width, textX, metaX } = this;
     const cy = this.cy(i);
     const laneIdx = this.lane.get(c.oid);
@@ -286,7 +375,6 @@ export class GraphView {
     meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
     g.append(msg, meta);
     if (this.onSelect) g.addEventListener('click', () => this.onSelect(c));
-    this.rowEls.set(c.oid, g);
     return g;
   }
 }
