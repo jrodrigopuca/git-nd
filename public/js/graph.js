@@ -145,14 +145,28 @@ export function renderGraph(commits, { onSelect, tips = {}, headOid = null } = {
       x += w + 6;
     }
 
-    // Truncate the message to the real space left before the meta zone,
-    // so long messages + branch chips never overlap the hash/date column.
+    // Fit the message into the real space left before the meta zone, so long
+    // messages + branch chips never overlap the hash/date column.
     const AVG_CHAR_PX = 6.6; // approx glyph width for the message font
     const avail = metaX - 10 - x;
-    const maxChars = Math.max(8, Math.floor(avail / AVG_CHAR_PX));
     const firstLine = c.message.split('\n')[0];
     const msg = svgEl('text', { x, y: cy(i) + 4, class: 'graph-msg' });
-    msg.textContent = firstLine.length > maxChars ? `${firstLine.slice(0, maxChars - 1)}…` : firstLine;
+    if (avail < 2 * AVG_CHAR_PX) {
+      // No room (chips already reached the meta zone): hide the message, keep
+      // the full text in a tooltip — same pattern the branch chips use.
+      const tip = svgEl('title', {});
+      tip.textContent = firstLine;
+      msg.append(tip);
+    } else {
+      const maxChars = Math.floor(avail / AVG_CHAR_PX);
+      const truncated = firstLine.length > maxChars;
+      msg.textContent = truncated ? `${firstLine.slice(0, maxChars - 1)}…` : firstLine;
+      if (truncated) {
+        const tip = svgEl('title', {});
+        tip.textContent = firstLine;
+        msg.append(tip);
+      }
+    }
     // Author lives in the avatar; keep the meta line lean. Anchored to the
     // right edge so it stays put regardless of message/chip length.
     const meta = svgEl('text', { x: width - 10, y: cy(i) + 4, 'text-anchor': 'end', class: 'graph-meta' });

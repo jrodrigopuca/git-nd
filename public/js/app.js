@@ -183,18 +183,21 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 
 /* ============================================================== refresh === */
 
-async function refreshAll() {
+async function refreshAll({ loading = false } = {}) {
   if (!repo) return;
-  const result = await withUi(
-    Promise.all([
-      api.get('/api/repo/info'),
-      api.get('/api/repo/status'),
-      api.get('/api/repo/branches'),
-      api.get('/api/repo/history?depth=80'),
-      api.get('/api/repo/history?all=1&depth=100'),
-    ]),
-    { loading: 'Loading repository…' },
-  );
+  const call = Promise.all([
+    api.get('/api/repo/info'),
+    api.get('/api/repo/status'),
+    api.get('/api/repo/branches'),
+    api.get('/api/repo/history?depth=80'),
+    api.get('/api/repo/history?all=1&depth=100'),
+  ]);
+  // Only the initial open / boot shows the fullscreen spinner and surfaces
+  // errors. Background refreshes (watcher, post commit/push/stash) stay silent
+  // to avoid covering the screen and clobbering another operation's spinner.
+  const result = loading
+    ? await withUi(call, { loading: 'Loading repository…' })
+    : await call.catch(() => null);
   if (!result) return;
   const [info, status, branches, history, graph] = result;
   if (!info) return;
@@ -765,7 +768,11 @@ function setDirty(dirty) {
 }
 
 async function openFile(path) {
-  // Switching files with unsaved edits would silently discard them: ask first.
+  // Reopening the same file with unsaved edits: don't reload (it would discard
+  // them). Just make sure the File tab is visible.
+  if (fileDirty && currentFile === path) { showTab('file'); return; }
+  // Switching to a different file with unsaved edits would silently discard
+  // them: ask first.
   if (fileDirty && currentFile && currentFile !== path) {
     const ok = await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and open "${path}"?`);
     if (!ok) return;
@@ -880,7 +887,7 @@ async function openRepo(dir) {
   closeModal();
   toast(`Repository opened: ${info.name}`, 'success');
   loadAuthor();
-  refreshAll();
+  refreshAll({ loading: true });
   switchView('repo');
   showTab('graph');
 }
@@ -1148,7 +1155,7 @@ onEvent('fs-changed', () => {
   try {
     repo = await api.get('/api/repo/info');
     loadAuthor();
-    refreshAll();
+    refreshAll({ loading: true });
     switchView('repo');
   } catch {
     switchView('explorer'); // nothing open → start where you pick a repo
