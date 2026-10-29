@@ -5,10 +5,16 @@ import fs from 'node:fs';
  * Holds the currently opened repository and in-progress merge state.
  * Single-user local app: one open repo at a time.
  */
+// Drop the isomorphic-git cache after this long without use, to give back the
+// memory of the loaded packfiles (~450 MB on a 14k-commit repo).
+const GIT_CACHE_IDLE_MS = 10 * 60 * 1000;
+
 class RepoState {
   constructor() {
     this.dir = null;
     this.merge = null; // { theirRef, theirOid, files: [], resolved: [] }
+    this._gitCache = null;
+    this._gitCacheTimer = null;
   }
 
   open(dir) {
@@ -18,7 +24,29 @@ class RepoState {
     }
     this.dir = resolved;
     this.merge = null;
+    this.dropGitCache();
     return resolved;
+  }
+
+  /**
+   * Shared isomorphic-git `cache` for the open repo (see docs/adr/0001).
+   * Without it every git.log/readCommit re-reads and re-parses the packfiles:
+   * 259 branch logs took 41.8 s uncached vs 2.5 s cached on a large repo.
+   * It holds parsed packfiles (immutable, keyed by file name), not query
+   * results, so it does not go stale; it lives while the repo is open and is
+   * dropped on repo switch or after GIT_CACHE_IDLE_MS idle.
+   */
+  gitCache() {
+    clearTimeout(this._gitCacheTimer);
+    this._gitCache ||= {};
+    this._gitCacheTimer = setTimeout(() => this.dropGitCache(), GIT_CACHE_IDLE_MS);
+    this._gitCacheTimer.unref?.();
+    return this._gitCache;
+  }
+
+  dropGitCache() {
+    clearTimeout(this._gitCacheTimer);
+    this._gitCache = null;
   }
 
   requireRepo() {

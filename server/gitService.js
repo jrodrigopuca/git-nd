@@ -8,6 +8,7 @@ import * as Diff from 'diff';
 import { repoState, AppError } from './state.js';
 import { getSettings, saveSettings } from './settings.js';
 import { tokenStore } from './tokenStore.js';
+import { partitionReachable } from './commitWalk.js';
 
 const IGNORED_DIRS = new Set(['.git']);
 
@@ -102,7 +103,7 @@ const FILE = 0, HEAD = 1, WORKDIR = 2, STAGE = 3;
 
 export async function status() {
   const dir = repoState.requireRepo();
-  const matrix = await git.statusMatrix({ fs, dir });
+  const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
   const files = [];
   for (const row of matrix) {
     const [filepath, head, workdir, stage] = [row[FILE], row[HEAD], row[WORKDIR], row[STAGE]];
@@ -217,7 +218,7 @@ export async function commit({ message, author }) {
     return completeMerge({ message, author: who });
   }
   // A commit snapshots the index; an empty index would produce an empty commit.
-  const matrix = await git.statusMatrix({ fs, dir });
+  const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
   const hasStaged = matrix.some(([, head, , stage]) =>
     (head === 0 && stage >= 2) || (head === 1 && stage !== 1));
   if (!hasStaged) throw new AppError('Nothing staged to commit: stage some changes first', 400);
@@ -265,12 +266,16 @@ const mapCommit = (c) => ({
   author: c.commit.author.name,
   email: c.commit.author.email,
   date: c.commit.author.timestamp * 1000,
+  // Ordering uses the committer date, like git: author dates survive rebases
+  // and cherry-picks, so a parent is often "newer" than its child by author
+  // date (113 such edges on a 14k-commit repo vs 3 by committer date).
+  committedAt: c.commit.committer.timestamp * 1000,
   parents: c.commit.parent,
 });
 
 export async function history({ depth = 100, ref } = {}) {
   const dir = repoState.requireRepo();
-  const commits = await git.log({ fs, dir, depth: Number(depth), ref: ref || undefined });
+  const commits = await git.log({ fs, dir, depth: Number(depth), ref: ref || undefined, cache: repoState.gitCache() });
   return commits.map(mapCommit);
 }
 
@@ -283,10 +288,11 @@ export async function historyAll({ depth = 100 } = {}) {
   const { current, local, remote } = await listBranches();
   const seen = new Map(); // oid → commit
   const tips = {};        // oid → [{ name, remote, current }]
+  const cache = repoState.gitCache();
 
   for (const name of [...local, ...remote]) {
     try {
-      const log = await git.log({ fs, dir, ref: name, depth: Number(depth) });
+      const log = await git.log({ fs, dir, ref: name, depth: Number(depth), cache });
       if (log[0]) {
         (tips[log[0].oid] ||= []).push({
           name,
@@ -298,16 +304,24 @@ export async function historyAll({ depth = 100 } = {}) {
     } catch { /* dangling ref */ }
   }
 
-  for (const t of await listTagsDetailed().catch(() => [])) {
-    if (seen.has(t.oid)) (tips[t.oid] ||= []).push({ name: t.name, tag: true });
+  // Tags are decoration: if they fail the graph still renders, but the failure
+  // is logged and reported instead of silently showing a graph without tags.
+  let tagsError = null;
+  try {
+    for (const t of await listTagsDetailed()) {
+      if (seen.has(t.oid)) (tips[t.oid] ||= []).push({ name: t.name, tag: true });
+    }
+  } catch (err) {
+    console.error('[historyAll] could not read tags:', err);
+    tagsError = err.message;
   }
 
   let headOid = null;
   try { headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' }); } catch { /* empty repo */ }
-  return { commits: topoSort([...seen.values()]), tips, headOid, current };
+  return { commits: topoSort([...seen.values()]), tips, headOid, current, tagsError };
 }
 
-/** Children before parents (required by the lane algorithm), newest-first tie-break. */
+/** Children before parents (required by the lane algorithm), newest-first tie-break by committer date. */
 function topoSort(commits) {
   const byOid = new Map(commits.map((c) => [c.oid, c]));
   const pendingChildren = new Map(commits.map((c) => [c.oid, 0]));
@@ -319,7 +333,7 @@ function topoSort(commits) {
   const ready = commits.filter((c) => pendingChildren.get(c.oid) === 0);
   const order = [];
   while (ready.length > 0) {
-    ready.sort((a, b) => a.date - b.date);
+    ready.sort((a, b) => a.committedAt - b.committedAt);
     const c = ready.pop(); // newest available first
     order.push(c);
     for (const p of c.parents) {
@@ -335,7 +349,7 @@ function topoSort(commits) {
 /** Files touched by a commit (vs its first parent), for the detail view. */
 export async function commitDetail(oid) {
   const dir = repoState.requireRepo();
-  const c = await git.readCommit({ fs, dir, oid });
+  const c = await git.readCommit({ fs, dir, oid, cache: repoState.gitCache() });
   const parent = c.commit.parent[0] || null;
   let files;
   if (parent) {
@@ -355,7 +369,7 @@ export async function commitDetail(oid) {
 }
 
 async function requireCleanTree(dir) {
-  const matrix = await git.statusMatrix({ fs, dir });
+  const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
   if (matrix.some(([, h, w, s]) => !(h === 1 && w === 1 && s === 1))) {
     throw new AppError('Working tree has local changes: commit or stash them first', 409);
   }
@@ -396,7 +410,7 @@ async function replayCommitOp(oid, author, mode) {
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new AppError('Detached HEAD: check out a branch first', 400);
 
-  const c = await git.readCommit({ fs, dir, oid });
+  const c = await git.readCommit({ fs, dir, oid, cache: repoState.gitCache() });
   if (c.commit.parent.length > 1) throw new AppError(`Cannot ${mode} a merge commit`, 409);
   const parent = c.commit.parent[0];
   if (!parent) throw new AppError(`Cannot ${mode} the root commit`, 409);
@@ -442,7 +456,7 @@ export async function amendCommit({ message, author }) {
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new AppError('Detached HEAD: cannot amend', 400);
   const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
-  const head = await git.readCommit({ fs, dir, oid: headOid });
+  const head = await git.readCommit({ fs, dir, oid: headOid, cache: repoState.gitCache() });
   const who = await resolveAuthor(dir, author);
   const oid = await git.commit({
     fs, dir,
@@ -456,17 +470,26 @@ export async function amendCommit({ message, author }) {
 
 /* ----------------------------------------------------------------- tags --- */
 
+/**
+ * Every tag with the commit it points to. Sequential on purpose: a Promise.all
+ * over 1,035 tags overflowed isomorphic-git's lock queue (max 1,000 pending)
+ * and the in-flight reads then exhausted the heap. With the shared cache the
+ * sequential loop takes ~0.8 s on that repo.
+ */
 export async function listTagsDetailed() {
   const dir = repoState.requireRepo();
+  const cache = repoState.gitCache();
   const names = await git.listTags({ fs, dir });
-  return Promise.all(names.map(async (name) => {
+  const tags = [];
+  for (const name of names) {
     let oid = await git.resolveRef({ fs, dir, ref: `refs/tags/${name}` });
     try {
-      const t = await git.readTag({ fs, dir, oid });
+      const t = await git.readTag({ fs, dir, oid, cache });
       oid = t.tag.object; // annotated tag → the commit it points to
     } catch { /* lightweight tag: already a commit oid */ }
-    return { name, oid };
-  }));
+    tags.push({ name, oid });
+  }
+  return tags;
 }
 
 export async function createTag(name, oid) {
@@ -588,18 +611,10 @@ export async function syncStatus({ tokens, doFetch = false } = {}) {
   const localOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
   if (localOid === remoteOid) return { branch, hasUpstream: true, ahead: 0, behind: 0 };
 
-  const [localLog, remoteLog] = await Promise.all([
-    git.log({ fs, dir, ref: branch, depth: 300 }),
-    git.log({ fs, dir, ref: theirRef, depth: 300 }),
-  ]);
-  const localSet = new Set(localLog.map((c) => c.oid));
-  const remoteSet = new Set(remoteLog.map((c) => c.oid));
-  return {
-    branch,
-    hasUpstream: true,
-    ahead: localLog.filter((c) => !remoteSet.has(c.oid)).length,
-    behind: remoteLog.filter((c) => !localSet.has(c.oid)).length,
-  };
+  const { left, right, truncated } = await partitionReachable({
+    dir, cache: repoState.gitCache(), left: localOid, right: remoteOid,
+  });
+  return { branch, hasUpstream: true, ahead: left.length, behind: right.length, truncated };
 }
 
 async function doMerge(theirRef, author) {
@@ -697,7 +712,7 @@ async function changedFiles(dir, oidA, oidB) {
 async function rebaseOnto(branch, theirRef) {
   const dir = repoState.requireRepo();
 
-  const matrix = await git.statusMatrix({ fs, dir });
+  const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
   const dirty = matrix.some(([, head, workdir, stage]) => !(head === 1 && workdir === 1 && stage === 1));
   if (dirty) throw new AppError('Working tree has local changes: commit or stash them before rebasing', 409);
 
@@ -705,26 +720,25 @@ async function rebaseOnto(branch, theirRef) {
   const localOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
   if (localOid === remoteOid) return { upToDate: true };
 
-  const [localLog, remoteLog] = await Promise.all([
-    git.log({ fs, dir, ref: branch, depth: 300 }),
-    git.log({ fs, dir, ref: theirRef, depth: 300 }),
-  ]);
-  const remoteSet = new Set(remoteLog.map((c) => c.oid));
+  // Exact split, however far apart the branches are (a fixed 300-commit
+  // window missed the fast-forward when the branch was further behind).
+  const { left: localOnly, right: remoteOnly, truncated } = await partitionReachable({
+    dir, cache: repoState.gitCache(), left: localOid, right: remoteOid,
+  });
+  if (truncated) {
+    throw new AppError('Branches diverged too far to rebase safely: use Pull (merge) instead', 409);
+  }
 
-  if (remoteSet.has(localOid)) { // no local commits → fast-forward
+  if (localOnly.length === 0) { // no local commits → fast-forward
     await git.writeRef({ fs, dir, ref: `refs/heads/${branch}`, value: remoteOid, force: true });
     await git.checkout({ fs, dir, ref: branch, force: true });
     return { rebased: true, fastForward: true };
   }
-  if (localLog.some((c) => c.oid === remoteOid)) {
+  if (remoteOnly.length === 0) {
     return { upToDate: true, note: 'You are ahead of the remote; nothing to rebase' };
   }
 
-  const toReplay = [];
-  for (const c of localLog) {
-    if (remoteSet.has(c.oid)) break;
-    toReplay.push(c);
-  }
+  const toReplay = localOnly; // newest first, like git.log
   if (toReplay.some((c) => c.commit.parent.length > 1)) {
     throw new AppError('Cannot rebase merge commits: use Pull (merge) instead', 409);
   }
@@ -782,12 +796,10 @@ export async function compareRefs(base, head) {
   if (!base || !head) throw new AppError('base and head refs are required', 400);
   const baseOid = await git.resolveRef({ fs, dir, ref: base });
   const headOid = await git.resolveRef({ fs, dir, ref: head });
-  const [baseLog, headLog] = await Promise.all([
-    git.log({ fs, dir, ref: baseOid, depth: 300 }),
-    git.log({ fs, dir, ref: headOid, depth: 300 }),
-  ]);
-  const baseSet = new Set(baseLog.map((c) => c.oid));
-  const commits = headLog.filter((c) => !baseSet.has(c.oid)).map(mapCommit);
+  const { right: headOnly } = await partitionReachable({
+    dir, cache: repoState.gitCache(), left: baseOid, right: headOid, limit: 1000,
+  });
+  const commits = headOnly.map(mapCommit);
   const files = baseOid === headOid ? [] : await changedFiles(dir, baseOid, headOid);
   return { base, head, baseOid, headOid, commits, files };
 }
@@ -800,12 +812,10 @@ export async function mergeDetail() {
 
   const ours = await currentBranch();
   const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
-  const [ourLog, theirLog] = await Promise.all([
-    git.log({ fs, dir, ref: headOid, depth: 200 }),
-    git.log({ fs, dir, ref: m.theirOid, depth: 200 }),
-  ]);
-  const ourSet = new Set(ourLog.map((c) => c.oid));
-  const incoming = theirLog.filter((c) => !ourSet.has(c.oid)).map(mapCommit);
+  const { right: theirOnly } = await partitionReachable({
+    dir, cache: repoState.gitCache(), left: headOid, right: m.theirOid, limit: 1000,
+  });
+  const incoming = theirOnly.map(mapCommit);
 
   const changed = await changedFiles(dir, headOid, m.theirOid);
   const conflictedSet = new Set(m.files);
@@ -893,7 +903,7 @@ export async function diffFile(filepath, oid, base) {
   }
 
   if (oid) {
-    const c = await git.readCommit({ fs, dir, oid });
+    const c = await git.readCommit({ fs, dir, oid, cache: repoState.gitCache() });
     const parent = c.commit.parent[0] || null;
     const oldText = parent ? await blobText(dir, parent, rel) : '';
     const newText = await blobText(dir, oid, rel);
