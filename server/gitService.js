@@ -8,7 +8,8 @@ import * as Diff from 'diff';
 import { repoState, AppError } from './state.js';
 import { getSettings, saveSettings } from './settings.js';
 import { tokenStore } from './tokenStore.js';
-import { partitionReachable } from './commitWalk.js';
+import { createHash } from 'node:crypto';
+import { partitionReachable, GraphWalk } from './commitWalk.js';
 
 const IGNORED_DIRS = new Set(['.git']);
 
@@ -301,71 +302,77 @@ export async function history({ depth = 100, ref } = {}) {
   return commits.map(mapCommit);
 }
 
-/**
- * Commits across ALL branches (local + origin) with branch tip labels,
- * topologically sorted so the graph can draw how branches interact.
- */
-export async function historyAll({ depth = 100 } = {}) {
-  const dir = repoState.requireRepo();
-  const { current, local, remote } = await listBranches();
-  const seen = new Map(); // oid → commit
-  const tips = {};        // oid → [{ name, remote, current }]
-  const cache = repoState.gitCache();
+/* --------------------------------------------------------------- graph --- */
 
+const GRAPH_MAX_LIMIT = 20000; // one request may re-load what the user already scrolled through
+
+/**
+ * Branch tips (local + origin) and HEAD, plus `walkId`: a hash of every
+ * ref → oid. Same refs ⇒ same walk ⇒ same rows, so the id tells the client
+ * whether its pages are still valid. Resolving 259 refs takes ~0.16 s.
+ */
+async function graphRefs(dir) {
+  const { current, local, remote } = await listBranches();
+  const tips = {}; // oid → [{ name, remote, current }]
+  const pairs = [];
   for (const name of [...local, ...remote]) {
     try {
-      const log = await git.log({ fs, dir, ref: name, depth: Number(depth), cache });
-      if (log[0]) {
-        (tips[log[0].oid] ||= []).push({
-          name,
-          remote: name.includes('/'),
-          current: name === current,
-        });
-      }
-      for (const c of log) if (!seen.has(c.oid)) seen.set(c.oid, mapCommit(c));
+      const oid = await git.resolveRef({ fs, dir, ref: name });
+      (tips[oid] ||= []).push({ name, remote: name.includes('/'), current: name === current });
+      pairs.push(`${name}=${oid}`);
     } catch { /* dangling ref */ }
   }
-
-  // Tags are decoration: if they fail the graph still renders, but the failure
-  // is logged and reported instead of silently showing a graph without tags.
-  let tagsError = null;
-  try {
-    for (const t of await listTagsDetailed()) {
-      if (seen.has(t.oid)) (tips[t.oid] ||= []).push({ name: t.name, tag: true });
-    }
-  } catch (err) {
-    console.error('[historyAll] could not read tags:', err);
-    tagsError = err.message;
-  }
-
   let headOid = null;
   try { headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' }); } catch { /* empty repo */ }
-  return { commits: topoSort([...seen.values()]), tips, headOid, current, tagsError };
+  pairs.sort();
+  const walkId = createHash('sha1').update(`HEAD=${headOid}\n${pairs.join('\n')}`).digest('hex').slice(0, 16);
+  return { walkId, tips, headOid, current };
 }
 
-/** Children before parents (required by the lane algorithm), newest-first tie-break by committer date. */
-function topoSort(commits) {
-  const byOid = new Map(commits.map((c) => [c.oid, c]));
-  const pendingChildren = new Map(commits.map((c) => [c.oid, 0]));
-  for (const c of commits) {
-    for (const p of c.parents) {
-      if (byOid.has(p)) pendingChildren.set(p, pendingChildren.get(p) + 1);
-    }
+/**
+ * One page of the graph (docs/adr/0001): commits + branch tips; tags come
+ * from graphTags() afterwards.
+ * - `known`: the client's walkId; if refs did not change → `{ unchanged }`.
+ * - `walk`:  the walkId the client is paging; if refs changed since → 409,
+ *            and the client reloads from offset 0.
+ */
+export async function graphPage({ walk, known, offset = 0, limit = 200 } = {}) {
+  const dir = repoState.requireRepo();
+  const refs = await graphRefs(dir);
+  if (known && known === refs.walkId) return { walkId: refs.walkId, unchanged: true };
+  if (walk && walk !== refs.walkId) {
+    throw new AppError('Branches changed since this page was loaded: reload the graph', 409);
   }
-  const ready = commits.filter((c) => pendingChildren.get(c.oid) === 0);
-  const order = [];
-  while (ready.length > 0) {
-    ready.sort((a, b) => a.committedAt - b.committedAt);
-    const c = ready.pop(); // newest available first
-    order.push(c);
-    for (const p of c.parents) {
-      if (!byOid.has(p)) continue;
-      const left = pendingChildren.get(p) - 1;
-      pendingChildren.set(p, left);
-      if (left === 0) ready.push(byOid.get(p));
-    }
+  const from = Math.max(0, Number(offset) || 0);
+  const count = Math.min(GRAPH_MAX_LIMIT, Math.max(1, Number(limit) || 200));
+
+  let gw = repoState.graphWalk;
+  if (!gw || gw.id !== refs.walkId) {
+    const seeds = Object.keys(refs.tips);
+    if (refs.headOid && !refs.tips[refs.headOid]) seeds.push(refs.headOid); // detached HEAD
+    gw = repoState.graphWalk = {
+      id: refs.walkId,
+      walk: new GraphWalk({ dir, getCache: () => repoState.gitCache(), tips: seeds }),
+    };
   }
-  return order;
+  await gw.walk.ensure(from + count);
+  const emitted = gw.walk.emitted;
+  return {
+    walkId: refs.walkId,
+    offset: from,
+    commits: emitted.slice(from, from + count).map(mapCommit),
+    tips: refs.tips,
+    headOid: refs.headOid,
+    current: refs.current,
+    done: gw.walk.done && from + count >= emitted.length,
+  };
+}
+
+/** Tags for the graph, `{ oid: [name] }`. Requested after the first page. */
+export async function graphTags() {
+  const tags = {};
+  for (const t of await listTagsDetailed()) (tags[t.oid] ||= []).push(t.name);
+  return { tags };
 }
 
 /** Files touched by a commit (vs its first parent), for the detail view. */

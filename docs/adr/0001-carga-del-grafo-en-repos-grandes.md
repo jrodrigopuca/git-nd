@@ -23,4 +23,5 @@
 ## Estado de implementación
 
 - Fase 1 (hecha): cache por repo; tags secuenciales y sin errores silenciosos (`tagsError`); `syncStatus`, `rebaseOnto`, `compareRefs` y `mergeDetail` con `partitionReachable`; `topoSort` ordenado por fecha de commit.
-- Fase 2 (pendiente): endpoint paginado + "Cargar más" + grafo incremental en `public/js/graph.js` (agregar filas sin redibujar, ancho fijo de lanes), tags en pedido aparte, recargar el grafo solo si cambiaron las refs.
+- Fase 2 (hecha): `GET /api/repo/graph` (cursor `walk` + `offset`, `known` para refrescos, 409 si cambiaron las refs) sobre `GraphWalk` (`server/commitWalk.js`); `GET /api/repo/graph/tags`; `GraphView` incremental en `public/js/graph.js`. Medido en svelte: primera página 0,43 s en el servidor; páginas paginadas idénticas a pedirlas de una vez; puntos y líneas del grafo paginado idénticos a dibujarlo entero; refresco sin cambios de refs no redibuja.
+- Pendiente: el costo del navegador crece con las filas cargadas (cada "Cargar más" tarda 0,3 s con 200 filas y 2,6 s con 14.000; red ~0,3 s constante). Si llegar al inicio en repos grandes deja de ser raro, el paso siguiente es virtualizar (dibujar solo las filas visibles).

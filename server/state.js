@@ -15,6 +15,7 @@ class RepoState {
     this.merge = null; // { theirRef, theirOid, files: [], resolved: [] }
     this._gitCache = null;
     this._gitCacheTimer = null;
+    this.graphWalk = null; // { id, walk: GraphWalk } — the paged graph in progress
   }
 
   open(dir) {
@@ -47,6 +48,7 @@ class RepoState {
   dropGitCache() {
     clearTimeout(this._gitCacheTimer);
     this._gitCache = null;
+    this.graphWalk = null; // its heap holds commits read through that cache
   }
 
   requireRepo() {

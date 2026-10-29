@@ -89,8 +89,9 @@ repoRouter.post('/api/repo/commit', h(async (req) => {
   return result;
 }));
 
-repoRouter.get('/api/repo/history', h((req) =>
-  req.query.all ? gitSvc.historyAll(req.query) : gitSvc.history(req.query)));
+repoRouter.get('/api/repo/history', h((req) => gitSvc.history(req.query)));
+repoRouter.get('/api/repo/graph', h((req) => gitSvc.graphPage(req.query)));
+repoRouter.get('/api/repo/graph/tags', h(() => gitSvc.graphTags()));
 
 repoRouter.get('/api/repo/sync', h((req) =>
   gitSvc.syncStatus({ tokens: tokenStore.tokens(), doFetch: req.query.fetch === '1' })));

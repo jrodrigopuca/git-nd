@@ -302,6 +302,7 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 
 /* ---------- graph ---------- */
 .graph-wrap { flex: 1; overflow: auto; padding: 10px; }
+.graph-footer { padding: 8px 0 16px; text-align: center; }
 .graph-row:hover rect { fill: var(--bg3); }
 .graph-msg { font-size: 12px; fill: var(--fg); }
 .graph-meta { font-size: 11px; fill: var(--muted); }

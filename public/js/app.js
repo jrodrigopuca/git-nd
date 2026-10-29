@@ -2,7 +2,7 @@ import { api, withUi, onEvent } from './api.js';
 import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren } from './ui.js';
 import { refreshTree, setStatusMap, setOpenFileHandler, initTreeDnD } from './tree.js';
 import { renderDiff } from './diff.js';
-import { renderGraph } from './graph.js';
+import { GraphView } from './graph.js';
 import { parseConflicts, assembleConflicts, renderConflictUI } from './conflict.js';
 
 const $ = (id) => document.getElementById(id);
@@ -190,7 +190,7 @@ async function refreshAll({ loading = false } = {}) {
     api.get('/api/repo/status'),
     api.get('/api/repo/branches'),
     api.get('/api/repo/history?depth=80'),
-    api.get('/api/repo/history?all=1&depth=100'),
+    api.get(graphRequestUrl()),
   ]);
   // Only the initial open / boot shows the fullscreen spinner and surfaces
   // errors. Background refreshes (watcher, post commit/push/stash) stay silent
@@ -199,7 +199,7 @@ async function refreshAll({ loading = false } = {}) {
     ? await withUi(call, { loading: 'Loading repository…' })
     : await call.catch(() => null);
   if (!result) return;
-  const [info, status, branches, history, graph] = result;
+  const [info, status, branches, history, graphPage] = result;
   if (!info) return;
   repo = info;
 
@@ -213,7 +213,7 @@ async function refreshAll({ loading = false } = {}) {
   renderMergeBanner(info.merge);
   renderBranches(branches);
   renderHistory(history);
-  renderGraphTab(graph);
+  renderGraphTab(graphPage);
   setStatusMap(status.files);
   await refreshTree();
   refreshStash();
@@ -409,13 +409,86 @@ function renderHistory(commits) {
     )));
 }
 
-function renderGraphTab(graph) {
-  const { commits = [], tips = {}, headOid = null } = graph || {};
-  $('graph-wrap').replaceChildren(
-    commits.length
-      ? renderGraph(commits, { onSelect: commitActions, tips, headOid })
-      : el('p', { class: 'muted' }, 'No commits.'),
+/* Paged graph (docs/adr/0001): first page with the refresh, "Load more" for
+   the next ones, tags fetched once per walk and applied on top. */
+const GRAPH_PAGE = 200;
+const graph = { dir: null, walkId: null, view: null, loaded: 0, done: true, busy: false };
+
+/**
+ * First-page request for refreshAll. Same repo + known walk → the server
+ * answers `unchanged` without walking (refs did not move). It asks for as
+ * many rows as are loaded, so a real change does not throw away the user's
+ * scroll depth.
+ */
+function graphRequestUrl() {
+  const sameRepo = graph.dir === repo?.dir && graph.walkId;
+  const limit = Math.max(GRAPH_PAGE, sameRepo ? graph.loaded : 0);
+  return `/api/repo/graph?limit=${limit}${sameRepo ? `&known=${graph.walkId}` : ''}`;
+}
+
+function renderGraphTab(page) {
+  if (!page || page.unchanged) return;
+  const wrap = $('graph-wrap');
+  const scrollTop = graph.dir === repo.dir ? wrap.scrollTop : 0;
+  Object.assign(graph, {
+    dir: repo.dir, walkId: page.walkId, loaded: page.commits.length, done: page.done, busy: false,
+  });
+  if (!page.commits.length) {
+    graph.view = null;
+    wrap.replaceChildren(el('p', { class: 'muted' }, 'No commits.'));
+    return;
+  }
+  graph.view = new GraphView({ onSelect: commitActions });
+  wrap.replaceChildren(
+    graph.view.reset(page.commits, { tips: page.tips, headOid: page.headOid }),
+    el('div', { class: 'graph-footer', id: 'graph-footer' }),
   );
+  wrap.scrollTop = scrollTop;
+  renderGraphFooter();
+  loadGraphTags(page.walkId);
+}
+
+function renderGraphFooter() {
+  const footer = $('graph-footer');
+  if (!footer) return;
+  setChildren(footer,
+    graph.done
+      ? el('span', { class: 'muted' }, `All ${graph.loaded} commits loaded`)
+      : el('button', { class: 'btn btn-xs', id: 'btn-graph-more', disabled: graph.busy, onclick: loadMoreGraph },
+        graph.busy ? 'Loading…' : `Load more commits (${graph.loaded} shown)`),
+  );
+}
+
+async function loadMoreGraph() {
+  if (graph.busy || graph.done || !graph.view) return;
+  graph.busy = true;
+  renderGraphFooter();
+  const { walkId, loaded } = graph;
+  try {
+    const page = await api.get(`/api/repo/graph?walk=${walkId}&offset=${loaded}&limit=${GRAPH_PAGE}`);
+    if (graph.walkId !== walkId) return; // a refresh replaced the graph meanwhile
+    graph.view.append(page.commits);
+    graph.loaded += page.commits.length;
+    graph.done = page.done;
+  } catch (err) {
+    if (err.status === 409) {
+      // Branches moved since the first page: reload what was shown plus one page.
+      const page = await api.get(`/api/repo/graph?limit=${loaded + GRAPH_PAGE}`).catch(() => null);
+      if (page) { renderGraphTab(page); return; }
+    }
+    toast(err.message, 'error');
+  } finally {
+    if (graph.walkId === walkId) { graph.busy = false; renderGraphFooter(); }
+  }
+}
+
+async function loadGraphTags(walkId) {
+  try {
+    const { tags } = await api.get('/api/repo/graph/tags');
+    if (graph.walkId === walkId && graph.view) graph.view.setTags(tags);
+  } catch (err) {
+    toast(`Could not load tags: ${err.message}`, 'error'); // the graph itself is fine
+  }
 }
 
 async function commitActions(c) {
