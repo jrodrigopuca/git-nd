@@ -761,10 +761,58 @@ $('btn-stash-pop').addEventListener('click', stashOp('pop'));
 
 let currentFile = null;
 let fileDirty = false;
+// Disk content as of the last open/save: the baseline to tell OUR edits apart
+// from changes made outside git-nd (another editor, a script, a git command).
+let loadedContent = null;
+let fileStale = false; // disk changed under unsaved edits
+
+function renderFileStatus() {
+  $('file-dirty').textContent = [
+    fileDirty && '● unsaved',
+    fileStale && '⚠ changed on disk',
+  ].filter(Boolean).join(' · ');
+}
 
 function setDirty(dirty) {
   fileDirty = dirty;
-  $('file-dirty').textContent = dirty ? '● unsaved' : '';
+  renderFileStatus();
+}
+
+const fetchFile = (path) => api.get(`/api/repo/file?path=${encodeURIComponent(path)}`);
+
+/**
+ * Called on watcher events. Without this the editor keeps showing what was on
+ * disk when it was opened, and a later Save silently overwrites external edits.
+ * - disk unchanged → nothing
+ * - clean editor   → reload in place
+ * - unsaved edits  → keep them, flag the file; saveFile() asks before overwriting
+ */
+async function checkFileOnDisk() {
+  if (!currentFile) return;
+  const path = currentFile;
+  const file = await fetchFile(path).catch(() => null); // deleted/unreadable: nothing to sync
+  if (!file || file.binary || path !== currentFile) return; // switched file meanwhile
+  const editor = $('file-editor');
+  if (file.content === loadedContent) return;
+  if (file.content === editor.value) { // e.g. our own save landing: in sync
+    loadedContent = file.content;
+    fileStale = false;
+    setDirty(false);
+    return;
+  }
+  if (!fileDirty) {
+    loadedContent = file.content;
+    const { selectionStart, selectionEnd, scrollTop } = editor;
+    editor.value = file.content;
+    editor.setSelectionRange(selectionStart, selectionEnd);
+    editor.scrollTop = scrollTop;
+    toast(`Reloaded "${path}": it changed on disk`);
+    return;
+  }
+  // loadedContent stays the OLD baseline on purpose: saveFile() compares
+  // against it to detect the external change and ask before overwriting.
+  fileStale = true;
+  renderFileStatus();
 }
 
 async function openFile(path) {
@@ -777,10 +825,12 @@ async function openFile(path) {
     const ok = await confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and open "${path}"?`);
     if (!ok) return;
   }
-  const file = await withUi(api.get(`/api/repo/file?path=${encodeURIComponent(path)}`));
+  const file = await withUi(fetchFile(path));
   if (!file) return;
   const editor = $('file-editor');
   currentFile = file.binary ? null : path;
+  loadedContent = file.binary ? null : file.content;
+  fileStale = false;
   $('file-path').textContent = path;
   editor.value = file.binary ? `(binary file, ${file.size} bytes)` : file.content;
   editor.readOnly = file.binary;
@@ -792,11 +842,24 @@ setOpenFileHandler(openFile);
 
 async function saveFile() {
   if (!currentFile || !fileDirty) return;
-  const r = await withUi(
-    api.post('/api/repo/file', { path: currentFile, content: $('file-editor').value }),
-    { success: `Saved: ${currentFile}` },
-  );
-  if (r !== null) { setDirty(false); refreshAll(); }
+  const path = currentFile;
+  // Checked here too, not only via the watcher: it skips dirs like dist/ and
+  // build/, and its event may not have arrived yet.
+  const disk = await fetchFile(path).catch(() => null);
+  if (disk && !disk.binary && disk.content !== loadedContent && disk.content !== $('file-editor').value) {
+    const ok = await confirmModal('File changed on disk',
+      `"${path}" was modified outside git-nd after you opened it. Overwrite those changes with yours?`);
+    if (!ok || path !== currentFile) return;
+  }
+  const content = $('file-editor').value;
+  const r = await withUi(api.post('/api/repo/file', { path, content }), { success: `Saved: ${path}` });
+  if (r === null) return;
+  if (path === currentFile) {
+    loadedContent = content;
+    fileStale = false;
+    setDirty($('file-editor').value !== content); // typed while saving → still dirty
+  }
+  refreshAll();
 }
 
 $('file-editor').addEventListener('input', () => setDirty(true));
@@ -805,6 +868,8 @@ $('btn-save-file').addEventListener('click', saveFile);
 /** Close the File tab: clear state and hide the tab (it is revealed again on open). */
 function closeFile() {
   currentFile = null;
+  loadedContent = null;
+  fileStale = false;
   setDirty(false);
   $('file-editor').value = '';
   $('file-path').textContent = '';
@@ -863,8 +928,17 @@ async function hunkOp(op, path, index, staged) {
   const r = await withUi(api.post(`/api/repo/hunks/${op}`, { path, hunks: [index] }), { success: labels[op] });
   if (r === null) return;
   await refreshAll();
-  showWorkdirDiff(path, staged); // re-render remaining hunks
+  // Re-render remaining hunks — unless the user closed the Diff tab meanwhile.
+  if (!document.querySelector('.tab[data-tab="diff"]').hidden) showWorkdirDiff(path, staged);
 }
+
+/** Close the Diff tab (read-only, nothing to lose); revealed again by the next diff. */
+$('btn-close-diff').addEventListener('click', () => {
+  $('diff-path').textContent = '';
+  $('diff-view').replaceChildren();
+  document.querySelector('.tab[data-tab="diff"]').hidden = true;
+  showTab('graph');
+});
 
 async function showDiff(path, oid, base) {
   const q = (oid ? `&oid=${oid}` : '') + (base ? `&base=${base}` : '');
@@ -1157,7 +1231,7 @@ onEvent('file-changed', () => refreshAll());
 let fsRefreshTimer = null;
 onEvent('fs-changed', () => {
   clearTimeout(fsRefreshTimer);
-  fsRefreshTimer = setTimeout(() => { if (repo) refreshAll(); }, 250);
+  fsRefreshTimer = setTimeout(() => { if (repo) { refreshAll(); checkFileOnDisk(); } }, 250);
 });
 
 /* ================================================================= boot === */
