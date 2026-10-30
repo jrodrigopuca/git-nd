@@ -398,6 +398,23 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 
 .commit-box { padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
 .commit-box textarea { min-height: 60px; resize: vertical; }
+/* Commit panel (visual review V-B). Staged files are what goes into the commit:
+   a tinted group, so it reads at a glance. */
+.staged-group {
+  margin: 0 8px 6px; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--bg2));
+  border-left: 2px solid var(--accent-solid);
+}
+.staged-group .subsection-title { padding-left: 10px; }
+.empty-hint { margin: 0; padding: 4px 12px 8px; font-size: 11.5px; color: var(--muted); }
+.author-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; font-size: 11.5px; }
+.author-line #author-source { font-size: 10.5px; }
+.btn-link {
+  background: none; border: 0; padding: 0; font: inherit; font-size: 11.5px;
+  color: var(--link); text-decoration: underline; cursor: pointer;
+}
+.commit-reason { font-size: 11.5px; color: var(--muted); }
+.commit-reason:empty { display: none; }
 
 input[type="text"], textarea, select {
   background: var(--bg); color: var(--fg);

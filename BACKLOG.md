@@ -412,7 +412,7 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - la misma fecha en el historial y en el grafo (solo fecha, con fecha y hora en hover);
   - las etiquetas de los paneles de conflicto pasaron de 10 a 11 px.
 
-### V-B `[ ]` 🟠 Panel de commit (patrón de GitHub Desktop)
+### V-B `[x]` 🟠 Panel de commit (patrón de GitHub Desktop)
 
 - **Propuesta:**
   - primero el mensaje;
@@ -423,6 +423,13 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - "Stage all" y "Unstage all" escritos en texto.
 
   Hoy Commit sigue siendo primario y habilitado durante un merge y sin cambios. Esfuerzo M.
+- **Cerrado:**
+  - **Orden:** primero el mensaje; el autor es una línea ("Ana <ana@x.io> · ✓ this repo's identity · change"). `#commit-author` sigue en el DOM y aparece con "change" (`aria-expanded`), o enseguida si no hay ningún autor configurado.
+  - **El botón dice qué hace:** "Commit 2 files to main", "Complete merge" o "Amend last commit". Si no puede, se deshabilita con el motivo visible y asociado por `aria-describedby`: "Stage at least one file to commit." o "Resolve N conflicted files first.". Ctrl+S sigue la misma regla.
+  - **Durante un merge** el mensaje puede ir vacío: el servidor usa "Merge <rama>". Antes el cliente lo bloqueaba.
+  - **Grupo staged:** tintado con `color-mix`, con contadores ("Staged · 2") y un aviso cuando está vacío. "Stage all" y "Unstage all" ahora son texto.
+  - **Contraste:** el texto gris sobre el tinte daba 4,55:1 en claro, apenas por encima del mínimo. `test/contrast.test.js` ahora lee el porcentaje real de `color-mix` y verifica todo el texto que va encima.
+  - **Test:** `e2e/commit-panel.spec.js`, 5 tests. Con el código anterior fallan los 5. Cubre el autor, los estados del botón, Ctrl+S, amend, el merge y el caso sin autor.
 
 ### V-D `[ ]` 🟡 Legibilidad del grafo
 

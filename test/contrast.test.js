@@ -65,6 +65,16 @@ for (const theme of ['dark', 'light']) {
     check('theirs label on its pane', t['theirs-text'], t.incoming, 4.5);
   });
 
+  test(`${theme}: text on the tinted staged group stays readable (V-B)`, () => {
+    // Read the tint exactly as the CSS mixes it, so raising the % gets caught.
+    const m = css.match(/\.staged-group\s*\{[^}]*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/);
+    assert.ok(m, '.staged-group background is a color-mix of two tokens');
+    const [, a, pct, b] = m;
+    const p = Number(pct) / 100;
+    const tint = `#${[1, 3, 5].map((i) => Math.round(parseInt(t[a].slice(i, i + 2), 16) * p + parseInt(t[b].slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
+    for (const fg of ['fg', 'muted', 'yellow-text', 'green-text', 'red-text', 'link']) check(`${fg} on the staged tint`, t[fg], tint, 4.5);
+  });
+
   test(`${theme}: input borders reach 3:1 (UI components)`, () => {
     check('input border on bg', t['border-strong'], t.bg, 3);
     check('input border on bg2', t['border-strong'], t.bg2, 3);

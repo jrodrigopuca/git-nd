@@ -297,6 +297,11 @@ function renderChanges(status) {
   const staged = status.files.filter((f) => f.stageStatus && !f.conflicted);
   const unstaged = status.files.filter((f) => (f.workStatus || f.conflicted));
   $('changes-count').textContent = status.files.length;
+  $('staged-count').textContent = staged.length;
+  $('unstaged-count').textContent = unstaged.length;
+  $('staged-empty').hidden = staged.length > 0;
+  stagedCount = staged.length;
+  updateCommitButton();
   // Same count on the narrow-window "Changes" button (the panel is a drawer there).
   $('panel-badge').textContent = status.files.length;
   $('panel-badge').hidden = status.files.length === 0;
@@ -349,15 +354,37 @@ async function loadAuthor() {
     const a = await api.get('/api/repo/author');
     if (a.name) $('commit-author').value = `${a.name} <${a.email}>`;
     const labels = {
-      repo: '✓ this repo\'s own identity (.git/config)',
-      github: '🐙 from your GitHub account — commit once to pin it to this repo',
-      gitlab: '🦊 from your GitLab account — commit once to pin it to this repo',
-      default: 'app default — commit once to pin it to this repo',
+      repo: '· ✓ this repo\'s identity',
+      github: '· 🐙 from your GitHub account',
+      gitlab: '· 🦊 from your GitLab account',
+      default: '· app default',
       none: '',
     };
     $('author-source').textContent = labels[a.source] ?? '';
+    // No author anywhere: the field is needed, so show it right away.
+    if (!a.name) showAuthorField(true);
+    renderAuthorLine();
   } catch { /* no repo */ }
 }
+
+/* Author as a line ("Ana <ana@x.io> · ✓ this repo's identity · change"), not a
+   field that reads like a required first step (visual review V-B). The input
+   stays in the DOM, revealed by "change". */
+function renderAuthorLine() {
+  const text = $('commit-author').value.trim();
+  $('author-display').textContent = text || 'No author set — enter one below';
+}
+function showAuthorField(show) {
+  $('commit-author').hidden = !show;
+  $('btn-author-change').setAttribute('aria-expanded', String(show));
+  $('btn-author-change').textContent = show ? 'done' : 'change';
+}
+$('btn-author-change').addEventListener('click', () => {
+  const show = $('commit-author').hidden;
+  showAuthorField(show);
+  if (show) $('commit-author').focus();
+});
+$('commit-author').addEventListener('input', renderAuthorLine);
 
 function parseAuthor(text) {
   const m = text.match(/^(.*?)\s*<(.+)>$/);
@@ -365,9 +392,12 @@ function parseAuthor(text) {
 }
 
 async function doCommit() {
+  // Ctrl+S obeys the same rule as the button: if it cannot commit, say why.
+  if ($('btn-commit').disabled) return toast($('commit-reason').textContent || 'Nothing to commit', 'error');
   const message = $('commit-msg').value.trim();
   const amend = $('amend-check').checked;
-  if (!message && !amend) { $('commit-msg').focus(); return toast('Write a commit message', 'error'); }
+  // A merge commit may go without a message: the server uses "Merge <ref>".
+  if (!message && !amend && !repo?.merge) { $('commit-msg').focus(); return toast('Write a commit message', 'error'); }
   const author = parseAuthor($('commit-author').value.trim());
   const result = await withUi(
     api.post(amend ? '/api/repo/amend' : '/api/repo/commit', { message, author }),
@@ -383,8 +413,33 @@ async function doCommit() {
 }
 $('btn-commit').addEventListener('click', doCommit);
 
+let stagedCount = 0;
+
+/**
+ * The commit button says what it will do — or is disabled with the reason
+ * next to it (aria-describedby="commit-reason"). One rule for the button
+ * AND Ctrl+S (visual review V-B).
+ */
 function updateCommitButton() {
-  $('btn-commit').textContent = $('amend-check').checked ? '✏️ Amend' : '✔ Commit';
+  const btn = $('btn-commit');
+  const merge = repo?.merge;
+  const pending = merge ? merge.files.filter((f) => !merge.resolved.includes(f)).length : 0;
+  let label;
+  let why = '';
+  if ($('amend-check').checked) {
+    label = '✏️ Amend last commit'; // may change just the message: nothing staged is fine
+  } else if (merge) {
+    label = '✔ Complete merge';
+    if (pending) why = `Resolve ${pending} conflicted file${pending === 1 ? '' : 's'} first.`;
+  } else if (!stagedCount) {
+    label = '✔ Commit';
+    why = 'Stage at least one file to commit.';
+  } else {
+    label = `✔ Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${repo?.branch || 'HEAD'}`;
+  }
+  btn.textContent = label;
+  btn.disabled = Boolean(why);
+  $('commit-reason').textContent = why;
 }
 $('amend-check').addEventListener('change', async () => {
   updateCommitButton();
@@ -761,6 +816,7 @@ $('btn-branch').addEventListener('click', async () => {
 function renderMergeBanner(merge) {
   $('merge-banner').hidden = !merge;
   $('tab-btn-merge').hidden = !merge;
+  updateCommitButton(); // "Complete merge" / its reason follow the merge state
   if (merge) {
     renderMergeView();
     // The open conflict file may no longer be part of this merge (another merge, another repo).
