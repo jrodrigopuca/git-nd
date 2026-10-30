@@ -37,25 +37,29 @@
     <!-- ============================== EXPLORER ============================== -->
     <section class="view" id="view-explorer">
       <div class="page">
-        <h1>Explorer</h1>
+        <div class="page-head">
+          <div>
+            <h1>Explorer</h1>
+            <p class="muted page-lead">Open a repository on this computer, or clone one.</p>
+          </div>
+          <button class="btn" id="ex-clone"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-download"/></svg>Clone from URL…</button>
+        </div>
         <div class="page-cols">
           <div>
             <h3>Recent repositories</h3>
-            <ul class="pick-list" id="ex-recents"></ul>
+            <ul class="ex-list" id="ex-recents"></ul>
 
             <h3>Browse folders</h3>
-            <div class="row" style="margin-bottom:8px">
+            <div class="ex-pathbar">
               <button class="btn btn-xs btn-icon" id="ex-up" title="Up one level" aria-label="Up one level"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-corner-left-up"/></svg></button>
-              <input type="text" id="ex-path" placeholder="/path/to/browse" />
+              <input type="text" id="ex-path" placeholder="/path/to/browse" aria-label="Folder path" spellcheck="false" />
             </div>
             <div id="ex-open-here"></div>
-            <ul class="pick-list" id="ex-dirs"></ul>
+            <ul class="ex-list" id="ex-dirs"></ul>
           </div>
           <div>
             <h3>Remote repositories <span class="muted" id="ex-remote-provider"></span></h3>
-            <div id="ex-remote-box">
-              <p class="muted">Connect a provider in <a href="#" id="ex-goto-conn">Connections</a> to list your repos.</p>
-            </div>
+            <div id="ex-remote-box"></div>
           </div>
         </div>
       </div>

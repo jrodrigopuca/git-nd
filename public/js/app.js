@@ -89,75 +89,102 @@ function addRecent(dir) {
 
 let browsePath = null;
 
+const baseName = (p) => p.replace(/\/+$/, '').split('/').pop() || p;
+/** A path cut at its START so the end shows (see .ex-path); bdi keeps it LTR. */
+const pathLine = (p) => el('span', { class: 'ex-path', title: p }, el('bdi', { dir: 'ltr' }, p));
+const emptyRow = (text) => el('li', { class: 'ex-empty' }, text);
+
+/*
+ * Explorer (visual review 2, R2-7): rows read by NAME with the path secondary;
+ * the open repo is marked; a repo folder has the view's ONE primary action;
+ * plain folders say you go in (chevron), repos say you open them.
+ */
 function renderExplorer() {
-  $('ex-recents').replaceChildren(
-    ...getRecents().map((dir) =>
-      el('li', { onclick: () => openRepo(dir) }, icon('folder-git-2'), dir)),
-  );
-  if (getRecents().length === 0) {
-    $('ex-recents').replaceChildren(el('li', { class: 'muted', style: 'cursor:default' }, 'Nothing yet — open a repo below.'));
-  }
+  const recents = getRecents();
+  $('ex-recents').replaceChildren(...(recents.length
+    ? recents.map((dir) => el('li', { onclick: () => openRepo(dir) },
+        icon('folder-git-2', { className: 'ex-repo' }),
+        el('span', { class: 'ex-text' }, el('span', { class: 'ex-name' }, baseName(dir)), pathLine(dir)),
+        dir === repo?.dir ? el('span', { class: 'pill-open' }, 'Open now') : el('span', { class: 'ex-go' }, 'Open', icon('arrow-right', { className: 'icon-after' }))))
+    : [emptyRow('Nothing yet — open a repository below, or clone one.')]));
   browseTo(browsePath);
   renderExplorerRemote();
 }
 
+// Opening Explorer browses the start folder; if you start typing a path while
+// that is on the way, its answer must not overwrite what you typed (it did,
+// and your Enter then browsed the start folder). Also, an older listing never
+// replaces a newer one (same pattern as B-18).
+let browseSeq = 0;
 async function browseTo(path) {
+  const mine = ++browseSeq;
+  const input = $('ex-path');
+  const typedBefore = input.value;
   const data = await api.get(`/api/fs/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`)
-    .catch((e) => { toast(e.message, 'error'); return null; });
-  if (!data) return;
+    .catch((e) => { if (mine === browseSeq) toast(e.message, 'error'); return null; });
+  if (!data || mine !== browseSeq || input.value !== typedBefore) return;
   browsePath = data.path;
-  $('ex-path').value = data.path;
+  input.value = data.path;
+  input.scrollLeft = input.scrollWidth; // show the current folder, not "/Users/…"
   $('ex-up').disabled = !data.parent;
   $('ex-up').onclick = () => data.parent && browseTo(data.parent);
 
-  $('ex-open-here').replaceChildren(
-    data.isRepo
-      ? el('button', { class: 'btn btn-primary', style: 'margin-bottom:8px', onclick: () => openRepo(data.path) },
-          `Open this repository (${data.path.split('/').pop()})`)
-      : '',
-  );
-  $('ex-dirs').replaceChildren(...data.entries.map((e) =>
-    el('li', { onclick: () => (e.isRepo ? openRepo(e.path) : browseTo(e.path)) },
-      icon(e.isRepo ? 'folder-git-2' : 'folder'), e.name,
-      el('span', { class: 'muted-right' }, e.isRepo ? 'git repository — click to open' : ''),
-    )));
-  if (data.entries.length === 0) {
-    $('ex-dirs').replaceChildren(el('li', { class: 'muted', style: 'cursor:default' }, 'No folders here.'));
-  }
+  setChildren($('ex-open-here'), data.isRepo && el('div', { class: 'ex-here' },
+    icon('folder-git-2', { className: 'ex-repo' }),
+    el('span', {}, el('strong', {}, baseName(data.path)), ' is a git repository'),
+    el('button', { class: 'btn btn-primary', onclick: () => openRepo(data.path) }, 'Open this repository')));
+  // The server lists repos first; each kind says what a click does.
+  $('ex-dirs').replaceChildren(...(data.entries.length
+    ? data.entries.map((e) => el('li', {
+        onclick: () => (e.isRepo ? openRepo(e.path) : browseTo(e.path)),
+        'aria-label': e.isRepo ? `Open repository ${e.name}` : `Go into folder ${e.name}`,
+      },
+      e.isRepo ? icon('folder-git-2', { className: 'ex-repo' }) : icon('folder'),
+      el('span', { class: 'ex-text' }, el('span', { class: 'ex-name' }, e.name)),
+      e.isRepo
+        ? el('span', { class: 'ex-go' }, 'Open', icon('arrow-right', { className: 'icon-after' }))
+        : icon('chevron-right', { className: 'ex-chevron' })))
+    : [emptyRow('No folders here.')]));
 }
 
 $('ex-path').addEventListener('keydown', (e) => { if (e.key === 'Enter') browseTo($('ex-path').value.trim()); });
-$('ex-goto-conn').addEventListener('click', (e) => { e.preventDefault(); switchView('connections'); });
+$('ex-clone').addEventListener('click', () => cloneModal());
+
+const REMOTE_SHOWN = 40;
 
 async function renderExplorerRemote() {
   const connected = authStatus?.providers.filter((p) => p.connected) || [];
   const box = $('ex-remote-box');
   if (connected.length === 0) {
     $('ex-remote-provider').textContent = '';
-    box.replaceChildren(
-      el('p', { class: 'muted' }, 'Connect a provider in ',
-        el('a', { href: '#', onclick: (e) => { e.preventDefault(); switchView('connections'); } }, 'Connections'),
-        ' to list your repos.'),
-    );
+    box.replaceChildren(el('div', { class: 'ex-remote-empty' },
+      el('span', { class: 'ex-brands' }, icon('github'), icon('gitlab')),
+      el('p', { class: 'muted' }, 'Connect GitHub or GitLab to see your repositories here and clone them in one click.'),
+      el('button', { class: 'btn', onclick: () => switchView('connections') }, 'Connect an account')));
     return;
   }
   const provider = connected[0].name;
-  $('ex-remote-provider').textContent = `— ${provider}`;
-  const filter = el('input', { type: 'text', placeholder: 'Filter…', style: 'margin-bottom:8px' });
-  const list = el('ul', { class: 'pick-list' }, el('li', { class: 'muted', style: 'cursor:default' }, 'Loading…'));
-  box.replaceChildren(filter, list);
+  $('ex-remote-provider').textContent = `— ${PROVIDER_LABEL[provider] || provider}`;
+  const filter = el('input', { type: 'search', placeholder: 'Filter repositories…', 'aria-label': 'Filter repositories' });
+  const list = el('ul', { class: 'ex-list' }, emptyRow('Loading…'));
+  const count = el('p', { class: 'ex-count', 'aria-live': 'polite' });
+  box.replaceChildren(el('div', { class: 'ex-search' }, icon('search'), filter), list, count);
 
   const data = await api.get(`/api/providers/list?provider=${provider}`).catch((e) => { toast(e.message, 'error'); return null; });
-  if (!data) { list.replaceChildren(el('li', { class: 'muted', style: 'cursor:default' }, 'Could not load repos.')); return; }
+  if (!data) { list.replaceChildren(emptyRow('Could not load repositories.')); return; }
   const render = () => {
     const q = filter.value.toLowerCase();
-    list.replaceChildren(...data.repos
-      .filter((r) => r.fullName.toLowerCase().includes(q))
-      .slice(0, 40)
-      .map((r) => el('li', { onclick: () => cloneModal(r.cloneUrl) },
-        r.private ? icon('lock', { label: 'Private' }) : null, r.fullName,
-        el('span', { class: 'muted-right' }, 'clone'),
-      )));
+    const matches = data.repos.filter((r) => r.fullName.toLowerCase().includes(q));
+    list.replaceChildren(...(matches.length
+      ? matches.slice(0, REMOTE_SHOWN).map((r) => el('li', { class: 'ex-remote-row', onclick: () => cloneModal(r.cloneUrl), 'aria-label': `Clone ${r.fullName}` },
+          icon('folder-git-2', { className: 'ex-repo' }),
+          el('span', { class: 'ex-text' },
+            el('span', { class: 'ex-name' }, r.fullName, ' ', r.private && el('span', { class: 'pill-private' }, icon('lock'), 'Private')),
+            r.description && el('span', { class: 'ex-desc' }, r.description)),
+          el('span', { class: 'ex-go' }, 'Clone…')))
+      : [emptyRow('No repositories match.')]));
+    // It used to cut at 40 without saying so.
+    count.textContent = matches.length ? `Showing ${Math.min(REMOTE_SHOWN, matches.length)} of ${matches.length}` : '';
   };
   filter.addEventListener('input', render);
   render();

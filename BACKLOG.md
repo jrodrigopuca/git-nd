@@ -544,7 +544,26 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
 ### B-27 `[ ]` 🟡 Con ningún repo abierto, el arranque pisa la vista que el usuario ya eligió
 - **Repro (visto al capturar Connections):** sin repo abierto, hacer clic en otra vista apenas carga la página. Cuando termina la carga, `app.js` ejecuta `switchView('explorer')` y lo lleva a Explorer.
 - **Propuesta:** ir a Explorer solo si el usuario no cambió de vista mientras cargaba.
-### R2-7 `[ ]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"
+### R2-7 `[x]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"
+- **Encabezado:** una línea de propósito y "Clone from URL…" (`#ex-clone`).
+- **Listas:** cada lista es una sola tarjeta (`.ex-list`).
+  - Los recientes muestran el **nombre** en negrita y la ruta en `--muted`, cortada al principio con `direction: rtl` más `<bdi>`.
+  - El repo abierto lleva el pill "Open now".
+- **Browse:**
+  - Up con ícono, y `#ex-path` desplazado hasta el final, para que se vea la carpeta actual.
+  - Una carpeta que es repo muestra la banda `.ex-here` con el **único** `.btn-primary` de la vista.
+  - Los repos dicen "Open →" y las carpetas llevan un chevron.
+- **Remote:**
+  - Sin cuentas, un estado vacío con "Connect an account".
+  - Con cuenta, un buscador con `aria-label`, descripción y el pill "Private" con texto.
+  - "Showing N of M": antes cortaba en 40 sin avisar.
+- **Encontrados y corregidos en el camino:**
+  - **Carrera:** al abrir Explorer, la respuesta de la carpeta inicial pisaba la ruta que estabas escribiendo, y Enter terminaba mandando la carpeta inicial. Ahora `browseTo` descarta una respuesta vieja y no pisa un campo que cambió mientras viajaba.
+  - **Layout:** `.page-cols` usaba `1fr 1fr` y una ruta larga empujaba la columna remota fuera de la pantalla. Pasó a `minmax(0, 1fr)`.
+  - **Buscador:** el ícono tapaba el placeholder, porque la regla genérica de inputs pisaba el padding.
+- **Contraste:** con el tinte del 6%, `--muted` sobre la banda da 4,35:1 en claro. Por eso el texto de la banda es `--fg`, y `test/contrast.test.js` lo exige.
+- **Tests:** `e2e/explorer.spec.js`, 8 tests. Con el código anterior fallan los 8; los 2 de layout los escribí al ver el defecto en las capturas, en rojo antes del fix. Los dos usos de `#ex-recents li` con la ruta completa siguen funcionando.
+- **Verificación visual:** en los dos temas, sin cuenta y con una lista remota simulada.
 
 ### B-25 `[?]` 🟡 "Initial commit" aparece dos veces en el historial
 

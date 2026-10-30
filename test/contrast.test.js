@@ -87,6 +87,17 @@ for (const theme of ['dark', 'light']) {
     assert.match(css, /\.graph-row\.selected \.graph-meta\s*\{[^}]*fill:\s*var\(--fg\)/);
   });
 
+  test(`${theme}: text on the "this folder is a repo" band stays readable (R2-7)`, () => {
+    const m = css.match(/\.ex-here\s*\{[^}]*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/);
+    assert.ok(m, '.ex-here background is a color-mix of two tokens');
+    const [, a, pct, b] = m;
+    const p = Number(pct) / 100;
+    const tint = `#${[1, 3, 5].map((i) => Math.round(parseInt(t[a].slice(i, i + 2), 16) * p + parseInt(t[b].slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
+    for (const fg of ['fg', 'link']) check(`${fg} on the repo band`, t[fg], tint, 4.5);
+    // --muted can't be on it (4.35:1 in light at 6%): the band sets its text to --fg.
+    assert.match(css, /\.ex-here\s*\{[^}]*(^|[;\s])color:\s*var\(--fg\)/);
+  });
+
   test(`${theme}: the brand leaf reaches 3:1 (graphical object) on every surface`, () => {
     for (const bg of ['bg', 'bg2', 'bg3']) check(`brand on ${bg}`, t.brand, t[bg], 3);
   });

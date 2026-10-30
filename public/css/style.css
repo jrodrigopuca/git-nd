@@ -151,7 +151,9 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
   font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
   color: var(--muted); margin: 22px 0 8px;
 }
-.page-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; }
+/* minmax(0, …): a grid item won't shrink below its content by default, and an
+   unbroken path is wide — it pushed the second column off screen. */
+.page-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 36px; }
 @media (max-width: 900px) { .page-cols { grid-template-columns: 1fr; } }
 
 .pick-list { list-style: none; padding: 0; margin: 0; }
@@ -163,6 +165,65 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 }
 .pick-list li:hover { background: var(--bg3); }
 .pick-list .muted-right { margin-left: auto; color: var(--muted); font-size: 11px; }
+
+/* ---------- Explorer (visual review 2, R2-7) ---------- */
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.page-lead { margin: 0 0 8px; }
+/* One card holding a list (was a card per item). */
+.ex-list {
+  list-style: none; padding: 0; margin: 0 0 6px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg2); overflow: hidden;
+}
+.ex-list > li {
+  display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 12px;
+  border-top: 1px solid var(--border); cursor: pointer; font-size: 12.5px; min-width: 0;
+}
+.ex-list > li:first-child { border-top: none; }
+.ex-list > li:hover, .ex-list > li:focus-visible { background: var(--bg3); }
+.ex-list > li.ex-empty { cursor: default; color: var(--muted); }
+.ex-list > li.ex-empty:hover { background: none; }
+.ex-list .icon { color: var(--muted); }
+.ex-list .icon.ex-repo { color: var(--brand); }
+.ex-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.ex-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Long paths cut at the START so the end (the repo folder) shows; the <bdi>
+   keeps the path itself left-to-right (else the leading "/" jumps to the end). */
+.ex-path {
+  color: var(--muted); font-size: 11.5px; font-family: var(--mono, ui-monospace, monospace);
+  direction: rtl; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ex-desc { color: var(--muted); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ex-go { margin-left: auto; color: var(--link); font-size: 11.5px; white-space: nowrap; opacity: 0; display: inline-flex; align-items: center; }
+.ex-list > li:hover .ex-go, .ex-list > li:focus-visible .ex-go { opacity: 1; }
+.ex-chevron { margin-left: auto; }
+.pill-open, .pill-private {
+  margin-left: auto; font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 4px;
+}
+.pill-open { color: var(--green-text); border: 1px solid currentColor; }
+.pill-private { color: var(--muted); border: 1px solid var(--border-strong); margin-left: 0; }
+.pill-private .icon { width: 11px; height: 11px; }
+.ex-pathbar { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.ex-pathbar input { font-family: var(--mono, ui-monospace, monospace); }
+.ex-here {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; font-size: 12.5px;
+  /* Its text is --fg on purpose: --muted is already near 4.5:1 on the plain
+     light bg, so ANY tint drops it under (test/contrast.test.js). */
+  background: color-mix(in srgb, var(--green) 6%, var(--bg)); color: var(--fg);
+}
+.ex-here .btn-primary { margin-left: auto; }
+.ex-remote-empty {
+  border: 1px dashed var(--border-strong); border-radius: 10px; padding: 20px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.ex-remote-empty .ex-brands { display: flex; gap: 10px; color: var(--muted); }
+.ex-remote-empty .ex-brands .icon { width: 22px; height: 22px; }
+.ex-remote-empty p { margin: 0; }
+.ex-search { position: relative; margin-bottom: 8px; }
+.ex-search .icon { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--muted); pointer-events: none; }
+.ex-search input[type="search"] { padding-left: 30px; } /* beats the generic input rule further down */
+.ex-count { color: var(--muted); font-size: 11.5px; margin: 0; }
 
 /* Connections (visual review 2, R2-6): one column of provider cards. */
 .conn-cards { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; max-width: 720px; }
