@@ -265,40 +265,45 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ## Tanda 3 — menores
 
-### B-14 `[ ]` 🟡 Los commits rebaseados conservan el committer y la fecha viejos
+### B-14 `[x]` 🟡 Los commits rebaseados conservan el committer y la fecha viejos
 
 - **Dónde:** `server/gitService.js` → `rebaseOnto`
 - **Descripción:** al re-aplicar commits se pasa solo `author`, así que el committer queda como el autor original con su fecha. Git pone como committer al usuario actual con la fecha actual. Como el grafo ordena por fecha de commit, un commit rebaseado puede quedar dibujado debajo de su padre.
 - **Criterios de aceptación:**
-  - [ ] Los commits rebaseados mantienen el autor y la fecha de autor, y tienen como committer al usuario actual con la fecha actual.
+  - [x] Los commits rebaseados mantienen el autor y la fecha de autor, y tienen como committer al usuario actual con la fecha actual.
+- **Cerrado:** `pull` le pasa el usuario actual a `rebaseOnto` (exportada para poder testearla sin red), que lo usa como committer con `timestamp` actual. Hay que pasarlo explícito: si falta, isomorphic-git copia el del autor. `test/rebase-committer.test.js`: con el código anterior falla, ahora pasa.
 
-### B-15 `[ ]` 🟡 Doble click en una carpeta del árbol la deja inconsistente
+### B-15 `[x]` 🟡 Doble click en una carpeta del árbol la deja inconsistente
 
 - **Dónde:** `public/js/tree.js`
 - **Descripción:** el colapso corre mientras la expansión todavía está cargando, y después se agregan los hijos igual. Queda ▶ con los hijos visibles, y el siguiente click los duplica. Si una carpeta expandida se borra, la promesa rechaza sin `catch`.
 - **Criterios de aceptación:**
-  - [ ] Clicks rápidos sobre una carpeta dejan siempre un estado coherente, sin hijos duplicados.
-  - [ ] Borrar una carpeta expandida no deja errores sin manejar.
+  - [x] Clicks rápidos sobre una carpeta dejan siempre un estado coherente, sin hijos duplicados.
+  - [x] Borrar una carpeta expandida no deja errores sin manejar.
+- **Cerrado:** cada nodo lleva una secuencia, y una carga de hijos que vuelve después de un click más nuevo se descarta. El re-expandido después de un refresco usa el mismo camino: si la carpeta ya no existe, la colapsa en vez de dejar una promesa sin manejar. E2E (scratchpad `e2e/batch3-ui.mjs`, que demora la respuesta por CDP): con el código anterior quedaba `▶` con hijos y después dos juegos de hijos; ahora pasa. **Pendiente:** es solo de navegador; queda para Playwright. El caso "carpeta borrada" está verificado solo leyendo el código.
 
-### B-16 `[ ]` 🟡 El WebSocket de otro origen completa el handshake antes de cerrarse
+### B-16 `[x]` 🟡 El WebSocket de otro origen completa el handshake antes de cerrarse
 
 - **Dónde:** `server/index.js`
 - **Descripción:** hoy no se filtra nada, porque el socket se cierra antes de registrarse. Es defensa en profundidad.
 - **Criterios de aceptación:**
-  - [ ] El upgrade se rechaza antes del handshake (`verifyClient`) si el `Origin` o el `Host` no son válidos.
+  - [x] El upgrade se rechaza antes del handshake (`verifyClient`) si el `Origin` o el `Host` no son válidos.
+- **Cerrado:** `verifyClient` responde 403 al upgrade. Test en `test/http-csrf.test.js`: con `Origin` ajeno, `Origin: null` o `Host` ajeno da 403, y el origen de la UI sigue conectando. Con el código anterior el handshake se completaba (`open`).
 
-### B-17 `[ ]` 🟡 Un clon fallido deja la carpeta destino vacía
+### B-17 `[x]` 🟡 Un clon fallido deja la carpeta destino vacía
 
 - **Dónde:** `server/gitService.js` → `cloneRepo`
 - **Criterios de aceptación:**
-  - [ ] Si el clon falla, se borra la carpeta solo si la creó el clon. Nunca se borra una carpeta que ya existía.
+  - [x] Si el clon falla, se borra la carpeta solo si la creó el clon. Nunca se borra una carpeta que ya existía.
+- **Cerrado:** `fsp.mkdir(…, { recursive: true })` devuelve la primera carpeta que creó, y eso es exactamente lo que se borra, incluidas las carpetas padre nuevas. Si la carpeta ya existía (vacía), se borra solo lo que escribió el clon. `test/clone-cleanup.test.js`: el caso de carpetas nuevas fallaba con el código anterior; los de carpeta existente y carpeta no vacía quedan como regresión.
 
-### B-18 `[ ]` 🟡 `refreshAll` puede pintar un estado viejo
+### B-18 `[x]` 🟡 `refreshAll` puede pintar un estado viejo
 
 - **Dónde:** `public/js/app.js` → `refreshAll`
 - **Descripción:** solo el grafo tiene guard de época. Un refresco del watcher que salió antes de un commit pero llega después pinta la lista de cambios y las ramas viejas hasta el próximo refresco.
 - **Criterios de aceptación:**
-  - [ ] Una respuesta de `refreshAll` más vieja que la última aplicada se descarta en todos los paneles.
+  - [x] Una respuesta de `refreshAll` más vieja que la última aplicada se descarta en todos los paneles.
+- **Cerrado:** cada `refreshAll` lleva un número, y la respuesta de uno que fue superado por un refresco más nuevo se descarta entera, incluidos tree, stash y sync. `refreshTree` tiene su propia secuencia, porque también se llama desde otros lugares. E2E (`e2e/batch3-ui.mjs`, que retiene por CDP la respuesta de `status` de un refresco viejo): con el código anterior quedaba `a.txt` como unstaged después del stage; ahora pasa. **Pendiente:** queda para Playwright.
 
 ---
 

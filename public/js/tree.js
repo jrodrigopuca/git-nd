@@ -39,34 +39,54 @@ function renderNode(entry) {
     st ? el('span', { class: `st st-${st}` }, ST_LABEL[st] || '') : null,
   );
 
-  row.addEventListener('click', async () => {
+  // Every expand/collapse bumps `seq`; a children load that comes back after
+  // a newer click is dropped. Before, a quick double click collapsed while the
+  // expand was still loading, then the children were appended anyway (▶ with
+  // children shown), and the next click appended a second set (BACKLOG B-15).
+  let seq = 0;
+  const twisty = () => row.querySelector('.twisty');
+  const collapse = () => {
+    seq++;
+    expanded.delete(entry.path);
+    node.querySelector('.tree-children')?.remove();
+    twisty().textContent = '▶';
+  };
+  const expand = async () => {
+    const mine = ++seq;
+    expanded.add(entry.path);
+    twisty().textContent = '▼';
+    let children;
+    try {
+      children = await renderLevel(entry.path);
+    } catch {
+      if (mine === seq) collapse(); // e.g. the folder was deleted meanwhile
+      return;
+    }
+    if (mine !== seq) return; // a newer click won
+    node.querySelector('.tree-children')?.remove();
+    node.append(children);
+  };
+
+  row.addEventListener('click', () => {
     container().querySelectorAll('.tree-row.selected').forEach((r) => r.classList.remove('selected'));
     row.classList.add('selected');
-    if (entry.type === 'dir') {
-      if (expanded.has(entry.path)) {
-        expanded.delete(entry.path);
-        node.querySelector('.tree-children')?.remove();
-        row.querySelector('.twisty').textContent = '▶';
-      } else {
-        expanded.add(entry.path);
-        row.querySelector('.twisty').textContent = '▼';
-        node.append(await renderLevel(entry.path));
-      }
-    } else {
-      onOpenFile(entry.path);
-    }
+    if (entry.type !== 'dir') onOpenFile(entry.path);
+    else if (expanded.has(entry.path)) collapse();
+    else expand();
   });
 
   node.append(row);
-  if (entry.type === 'dir' && expanded.has(entry.path)) {
-    renderLevel(entry.path).then((children) => node.append(children));
-  }
+  if (entry.type === 'dir' && expanded.has(entry.path)) expand(); // re-expand after a refresh
   return node;
 }
 
+let treeSeq = 0; // a slower, older tree response must not replace a newer one (BACKLOG B-18)
+
 export async function refreshTree() {
+  const mine = ++treeSeq;
   try {
     const entries = await api.get('/api/repo/tree?path=.');
+    if (mine !== treeSeq) return;
     container().replaceChildren(...entries.map(renderNode));
   } catch {
     /* no repo open yet */

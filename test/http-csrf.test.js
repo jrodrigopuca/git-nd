@@ -74,6 +74,24 @@ test('the page itself and the OAuth routes do not need the header (they are navi
   assert.notEqual((await call('/auth/github/login')).status, 403);
 });
 
+/** Try a WebSocket handshake: 'open' if it completed, else the HTTP status it got. */
+async function wsHandshake(headers) {
+  const { WebSocket } = await import('ws');
+  return new Promise((resolve) => {
+    const ws = new WebSocket(`ws://localhost:${PORT}/ws`, { headers });
+    ws.on('open', () => { ws.close(); resolve('open'); });
+    ws.on('unexpected-response', (_req, res) => resolve(res.statusCode));
+    ws.on('error', () => resolve('error'));
+  });
+}
+
+test('BACKLOG B-16: a WebSocket from another origin is refused BEFORE the handshake', async () => {
+  assert.equal(await wsHandshake({ Origin: 'https://evil.example' }), 403);
+  assert.equal(await wsHandshake({ Origin: 'null' }), 403);
+  assert.equal(await wsHandshake({ Host: `evil.example:${PORT}`, Origin: `http://evil.example:${PORT}` }), 403);
+  assert.equal(await wsHandshake({ Origin: `http://localhost:${PORT}` }), 'open', 'the UI origin still connects');
+});
+
 test('GET /api/repo/sync never fetches; the fetch is a POST', async () => {
   remote = http.createServer((req, res) => { remoteHits++; res.writeHead(404); res.end(); });
   await new Promise((r) => remote.listen(0, '127.0.0.1', r));

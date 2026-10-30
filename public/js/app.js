@@ -183,8 +183,16 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 
 /* ============================================================== refresh === */
 
+// Each refreshAll takes a number; a response that comes back after a NEWER
+// refresh started is dropped whole. The newer one reflects later state no
+// matter which lands first. Without it, a watcher refresh issued before a
+// commit but answered after the commit's own refresh repainted the old
+// changes list and branches (BACKLOG B-18).
+let refreshSeq = 0;
+
 async function refreshAll({ loading = false } = {}) {
   if (!repo) return;
+  const mySeq = ++refreshSeq;
   const graphEpoch = graph.epoch; // the graph state this refresh's page request is based on
   // allSettled, not all: one failing panel must not leave the whole screen on
   // the PREVIOUS repo, with buttons that act on the new one (BACKLOG B-08).
@@ -199,7 +207,7 @@ async function refreshAll({ loading = false } = {}) {
   // errors. Background refreshes (watcher, post commit/push/stash) stay silent
   // to avoid covering the screen and clobbering another operation's spinner.
   const settled = loading ? await withUi(call, { loading: 'Loading repository…' }) : await call;
-  if (!settled) return;
+  if (!settled || mySeq !== refreshSeq) return; // superseded by a newer refresh
   const [infoR, statusR, branchesR, historyR, graphR] = settled;
   const failed = settled.filter((r) => r.status === 'rejected');
   if (loading && failed.length) toast(`Some panels could not load: ${failed[0].reason.message}`, 'error');
@@ -240,6 +248,7 @@ async function refreshAll({ loading = false } = {}) {
   renderGraphTab(graphPage, graphEpoch);
   setStatusMap(status.files);
   await refreshTree();
+  if (mySeq !== refreshSeq) return; // a newer refresh will do stash/sync
   refreshStash();
   refreshSync(false);
 }

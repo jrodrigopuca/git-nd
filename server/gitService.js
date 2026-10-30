@@ -104,8 +104,22 @@ export async function cloneRepo(url, targetDir, tokens) {
   if (fs.existsSync(dir) && fs.readdirSync(dir).length > 0) {
     throw new AppError(`Target directory is not empty: ${dir}`, 400);
   }
-  await fsp.mkdir(dir, { recursive: true });
-  await git.clone({ fs, http, dir, url, onAuth: authFor(tokens), ...NO_REPO_PROXY });
+  const existed = fs.existsSync(dir);
+  // mkdir returns the FIRST folder it created (undefined if all existed): on
+  // failure that is exactly what to remove — new parents included, never a
+  // folder that was already there (BACKLOG B-17).
+  const createdRoot = await fsp.mkdir(dir, { recursive: true });
+  try {
+    await git.clone({ fs, http, dir, url, onAuth: authFor(tokens), ...NO_REPO_PROXY });
+  } catch (err) {
+    if (createdRoot) {
+      await fsp.rm(createdRoot, { recursive: true, force: true });
+    } else if (existed) {
+      // It was empty before (checked above): remove only what the clone wrote.
+      for (const entry of await fsp.readdir(dir)) await fsp.rm(path.join(dir, entry), { recursive: true, force: true });
+    }
+    throw err;
+  }
   repoState.open(dir);
   return dir;
 }
@@ -829,7 +843,7 @@ export async function pull({ remote = 'origin', tokens, author, rebase = false }
     return { branch, upToDate: true, note: 'Branch does not exist on the remote yet' };
   }
   if (rebase) {
-    const result = await rebaseOnto(branch, theirRef);
+    const result = await rebaseOnto(branch, theirRef, who);
     return { branch, ...result };
   }
   const result = await doMerge(theirRef, who);
@@ -873,7 +887,8 @@ async function changedFiles(dir, oidA, oidB) {
  * and suggest a merge pull. Real git is line-level; this keeps the common
  * "we worked on different files" case linear without risking history.
  */
-async function rebaseOnto(branch, theirRef) {
+/** Exported for tests (pull reaches it only after a network fetch). */
+export async function rebaseOnto(branch, theirRef, committer) {
   const dir = repoState.requireRepo();
 
   const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
@@ -934,7 +949,18 @@ async function rebaseOnto(branch, theirRef) {
           await git.add({ fs, dir, filepath });
         }
       }
-      await git.commit({ fs, dir, message: c.commit.message, author: c.commit.author });
+      // Like `git rebase`: keep the author (and author date), but the commit is
+      // made NOW by the current user. Reusing the old committer date put
+      // rebased commits "before" their new parent in date order (BACKLOG B-14).
+      await git.commit({
+        fs, dir, message: c.commit.message, author: c.commit.author,
+        // isomorphic-git fills a committer without timestamp from the AUTHOR's, so set it.
+        committer: {
+          ...(committer?.name && committer?.email ? { name: committer.name, email: committer.email } : c.commit.author),
+          timestamp: Math.floor(Date.now() / 1000),
+          timezoneOffset: new Date().getTimezoneOffset(),
+        },
+      });
     }
   } catch (err) {
     // Restore the branch exactly as it was — a failed rebase must be invisible.

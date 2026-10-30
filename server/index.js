@@ -108,15 +108,18 @@ function humanize(err) {
 }
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
-wss.on('connection', (ws, req) => {
-  // Browsers always send Origin on WebSocket upgrades; enforce it too.
-  if (!ALLOWED_HOSTS.has(req.headers.host) || !isAllowedOrigin(req.headers.origin)) {
-    ws.close(1008, 'Forbidden origin');
-    return;
-  }
-  registerSocket(ws);
+// Browsers always send Origin on WebSocket upgrades. Checked in verifyClient,
+// so a foreign origin gets a 403 and the handshake never completes; closing
+// after `connection` (as before) let it open first (BACKLOG B-16).
+const wss = new WebSocketServer({
+  server,
+  path: '/ws',
+  verifyClient: ({ req }, done) => {
+    const ok = ALLOWED_HOSTS.has(req.headers.host) && isAllowedOrigin(req.headers.origin);
+    done(ok, ok ? undefined : 403, ok ? undefined : 'Forbidden origin');
+  },
 });
+wss.on('connection', (ws) => registerSocket(ws));
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`\n  git-nd running at http://localhost:${PORT}\n`);
