@@ -94,6 +94,27 @@ test('abort after a restart cleans the merge files and the tree', async () => {
   assert.equal((await svc.repoInfo()).merge, null);
 });
 
+test('a merge FINISHED from the git CLI is over for the app too; Abort cannot destroy later work', async () => {
+  const dir = conflictRepo('cli-finish');
+  await svc.openRepo(dir);
+  await svc.mergeBranch({ theirRef: 'feat', author });
+  // The user resolves and commits in a terminal: git removes MERGE_HEAD.
+  write(dir, 'f.txt', 'RESOLVED\n');
+  git(dir, 'add', 'f.txt');
+  git(dir, 'commit', '-q', '--no-edit');
+  assert.equal(parents(dir), 2, 'the CLI made the merge commit');
+  // Later, unrelated uncommitted work.
+  write(dir, 'other.txt', 'o\nfrom feat\nWORK IN PROGRESS\n');
+
+  assert.equal((await svc.repoInfo()).merge, null, 'no phantom merge');
+  await assert.rejects(svc.abortMerge(), /no merge in progress/i);
+  assert.equal(read(dir, 'other.txt'), 'o\nfrom feat\nWORK IN PROGRESS\n', 'later work survives');
+  await assert.rejects(svc.resolveConflict('f.txt', 'X\n'), /no merge in progress/i);
+  await svc.stage('other.txt');
+  await svc.commit({ message: 'plain commit after the CLI merge', author });
+  assert.equal(parents(dir), 1, 'a normal commit, not another merge');
+});
+
 test('a merge started with the git CLI is shown as in progress and completes as a merge', async () => {
   const dir = conflictRepo('cli');
   assert.throws(() => git(dir, 'merge', 'feat'), 'CLI merge stops on the conflict');

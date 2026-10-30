@@ -67,6 +67,39 @@ for (const [name, [before, afterText]] of Object.entries(CASES)) {
   });
 }
 
+test('discard all hunks of a DELETED file restores it byte-exact (final newline included)', async () => {
+  const dir = makeRepo('deleted', { 'f.txt': 'a\nb\n' });
+  fs.rmSync(path.join(dir, 'f.txt'));
+  open(dir);
+  await svc.applyHunkOp('f.txt', await allHunks('f.txt', 'unstaged'), 'discard');
+  assert.equal(disk(dir, 'f.txt'), 'a\nb\n');
+});
+
+test('a UTF-8 BOM is content: no phantom hunk, and staging keeps it', async () => {
+  const BOM = '﻿';
+  const dir = makeRepo('bom', { 'f.txt': `${BOM}l1\nl2\nl3\nl4\nl5\nl6\nl7\n` });
+  write(dir, 'f.txt', `${BOM}l1\nl2\nl3\nl4\nl5\nl6\nL7\n`);
+  open(dir);
+  const { hunks } = await svc.fileHunks('f.txt', 'unstaged');
+  assert.equal(hunks.length, 1, 'only the real change');
+  assert.ok(hunks[0].rows.every((r) => !(r.left?.type === 'removed' && /l1$/.test(r.left.text))), 'line 1 untouched');
+  await svc.applyHunkOp('f.txt', [0], 'stage');
+  assert.equal(indexOf(dir, 'f.txt'), `${BOM}l1\nl2\nl3\nl4\nl5\nl6\nL7\n`);
+  assert.equal(git(dir, 'diff', '--cached', '--stat').includes('1 file changed, 1 insertion(+), 1 deletion(-)'), true);
+});
+
+test('unstage all hunks of a NEW file ≡ git restore --staged (entry removed, not an empty blob)', async () => {
+  const appRepo = makeRepo('newfile-app');
+  const gitRepo = makeRepo('newfile-git');
+  for (const d of [appRepo, gitRepo]) { write(d, 'n.txt', 'new\ncontent\n'); git(d, 'add', 'n.txt'); }
+  open(appRepo);
+  await svc.applyHunkOp('n.txt', await allHunks('n.txt', 'staged'), 'unstage');
+  git(gitRepo, 'restore', '--staged', 'n.txt');
+  assert.equal(git(appRepo, 'status', '--porcelain'), git(gitRepo, 'status', '--porcelain'));
+  assert.equal(git(appRepo, 'ls-files', 'n.txt'), '', 'not in the index');
+  assert.equal(disk(appRepo, 'n.txt'), 'new\ncontent\n', 'working file untouched');
+});
+
 test('partial: staging only the first of two hunks', async () => {
   const [before, afterText] = CASES['two distant hunks (regression)'];
   const dir = makeRepo('partial', { 'f.txt': before });

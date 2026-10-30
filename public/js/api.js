@@ -3,7 +3,8 @@ import { toast } from './ui.js';
 async function request(method, url, body) {
   const res = await fetch(url, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    // X-GitND: the server refuses /api/* without it (CSRF defense, BACKLOG B-12).
+    headers: { 'X-GitND': '1', ...(body ? { 'Content-Type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await res.json().catch(() => ({}));

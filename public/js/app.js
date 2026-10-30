@@ -186,7 +186,9 @@ $('btn-auth').addEventListener('click', () => switchView('connections'));
 async function refreshAll({ loading = false } = {}) {
   if (!repo) return;
   const graphEpoch = graph.epoch; // the graph state this refresh's page request is based on
-  const call = Promise.all([
+  // allSettled, not all: one failing panel must not leave the whole screen on
+  // the PREVIOUS repo, with buttons that act on the new one (BACKLOG B-08).
+  const call = Promise.allSettled([
     api.get('/api/repo/info'),
     api.get('/api/repo/status'),
     api.get('/api/repo/branches'),
@@ -196,12 +198,33 @@ async function refreshAll({ loading = false } = {}) {
   // Only the initial open / boot shows the fullscreen spinner and surfaces
   // errors. Background refreshes (watcher, post commit/push/stash) stay silent
   // to avoid covering the screen and clobbering another operation's spinner.
-  const result = loading
-    ? await withUi(call, { loading: 'Loading repository…' })
-    : await call.catch(() => null);
-  if (!result) return;
-  const [info, status, branches, history, graphPage] = result;
-  if (!info) return;
+  const settled = loading ? await withUi(call, { loading: 'Loading repository…' }) : await call;
+  if (!settled) return;
+  const [infoR, statusR, branchesR, historyR, graphR] = settled;
+  const failed = settled.filter((r) => r.status === 'rejected');
+  if (loading && failed.length) toast(`Some panels could not load: ${failed[0].reason.message}`, 'error');
+  if (infoR.status === 'rejected') return; // without info we cannot know which repo this is
+  const info = infoR.value;
+  if (repo?.dir && info.dir !== repo.dir && !switchingRepo) {
+    // The server's repo was switched from outside this tab (another tab, a
+    // script): every view bound to a path of the old repo must go, or its
+    // buttons act on the new one (BACKLOG B-04, reopened).
+    const lost = fileDirty ? currentFile : null;
+    closeRepoViews();
+    toast(`Repository switched to ${info.name} from another window${lost ? ` — unsaved changes to ${lost} were discarded` : ''}`,
+      lost ? 'error' : 'info', 7000);
+  }
+  // A failed panel shows as empty: never as another repo's content.
+  const status = statusR.status === 'fulfilled' ? statusR.value : { branch: info.branch, merge: info.merge, files: [] };
+  const branches = branchesR.status === 'fulfilled' ? branchesR.value : { current: info.branch, local: [], remote: [] };
+  const history = historyR.status === 'fulfilled' ? historyR.value : [];
+  const graphPage = graphR.status === 'fulfilled' ? graphR.value : null;
+  if (!graphPage && graph.dir !== info.dir) {
+    graph.view?.destroy();
+    Object.assign(graph, { dir: info.dir, walkId: null, view: null, loaded: 0, done: true });
+    graph.epoch++;
+    $('graph-wrap').replaceChildren(el('p', { class: 'muted pad' }, 'Could not load the graph.'));
+  }
   repo = info;
 
   $('repo-chip').hidden = false;
@@ -327,13 +350,21 @@ function applyPullModeUi() {
 
 async function refreshSync(fetch) {
   if (!repo) return;
-  const s = await api.get(`/api/repo/sync${fetch ? '?fetch=1' : ''}`)
-    .catch((e) => { if (fetch) throw e; return null; }); // surface fetch failures (e.g. auth)
-  if (!s) return;
   const badge = (id, n) => {
     $(id).hidden = !n;
     $(id).textContent = n;
   };
+  let s;
+  try {
+    s = await (fetch ? api.post('/api/repo/sync/fetch') : api.get('/api/repo/sync'));
+  } catch (e) {
+    // Unknown state: clear the badges rather than keep the previous repo's
+    // numbers on screen (BACKLOG B-21).
+    badge('behind-badge', 0);
+    badge('ahead-badge', 0);
+    if (fetch) throw e; // surface fetch failures (e.g. auth)
+    return null;
+  }
   badge('behind-badge', s.hasUpstream ? s.behind : 0);
   badge('ahead-badge', s.hasUpstream ? s.ahead : 0);
   if (fetch && s.hasUpstream) {
@@ -860,7 +891,9 @@ async function refreshStash() {
     const items = Array.isArray(list) ? list : [];
     $('stash-list').replaceChildren(...items.map((s) =>
       el('li', {}, typeof s === 'string' ? s : JSON.stringify(s))));
-  } catch { /* stash unsupported */ }
+  } catch {
+    $('stash-list').replaceChildren(); // never the previous repo's stashes (BACKLOG B-21)
+  }
 }
 
 const stashOp = (op) => async () => {
@@ -1032,7 +1065,9 @@ async function showWorkdirDiff(path, staged) {
   setChildren($('diff-view'),
     blocks.length
       ? el('div', { class: 'hunk-wrap' }, blocks)
-      : el('p', { class: 'muted pad' }, staged ? 'Nothing staged for this file.' : 'No unstaged changes for this file.'),
+      : el('p', { class: 'muted pad' }, data.symlink
+        ? 'Symbolic link: it has no hunks. Stage or discard it as a whole from the Changes list.'
+        : staged ? 'Nothing staged for this file.' : 'No unstaged changes for this file.'),
   );
   showTab('diff');
 }
@@ -1090,12 +1125,23 @@ async function confirmLeaveFile() {
   return confirmModal('Discard changes', `"${currentFile}" has unsaved changes. Discard and switch repository?`);
 }
 
+// True while THIS tab is opening/cloning a repo: the server's `repo-opened`
+// broadcast arrives before the response, and must not read as "switched
+// from another window".
+let switchingRepo = false;
+
 async function openRepo(dir) {
   if (!(await confirmLeaveFile())) return;
-  const info = await withUi(api.post('/api/repo/open', { dir }), { loading: 'Opening repository…' });
-  if (!info) return;
-  closeRepoViews();
-  repo = info;
+  switchingRepo = true;
+  let info;
+  try {
+    info = await withUi(api.post('/api/repo/open', { dir }), { loading: 'Opening repository…' });
+    if (!info) return;
+    closeRepoViews();
+    repo = info; // only now may a refresh compare against the new repo
+  } finally {
+    switchingRepo = false;
+  }
   addRecent(info.dir);
   closeModal();
   toast(`Repository opened: ${info.name}`, 'success');
@@ -1136,14 +1182,17 @@ async function cloneModal(prefillUrl = '') {
 
   const go = async () => {
     if (!url.value.trim()) return;
+    switchingRepo = true; // see openRepo
     const info = await withUi(
       api.post('/api/repo/clone', { url: url.value.trim(), dir: dest.value.trim() || undefined }),
       { loading: 'Cloning… this may take a while' },
     );
+    if (!info) switchingRepo = false;
     if (info) {
       toast(`Repository cloned into ${info.dir} ✔`, 'success', 6000);
       closeRepoViews();
       repo = info;
+      switchingRepo = false;
       addRecent(info.dir);
       closeModal();
       loadAuthor();
@@ -1356,13 +1405,24 @@ async function quickOpen() {
 document.addEventListener('keydown', (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
-  if (e.key === 's' && !e.shiftKey) {
-    e.preventDefault();
-    // Context-aware: on the File tab Ctrl+S saves the file, elsewhere it commits.
-    if (activeTab() === 'file' && currentFile) saveFile();
-    else doCommit();
-  } else if (e.key.toLowerCase() === 'p' && e.shiftKey) { e.preventDefault(); doPush(); }
-  else if (e.key === 'p') { e.preventDefault(); quickOpen(); }
+  const key = e.key.toLowerCase();
+  if (key !== 's' && key !== 'p') return;
+  e.preventDefault(); // never the browser's own Save / Print dialogs
+  // A modal owns the keyboard: no commit, push or quick-open happening behind
+  // it (BACKLOG B-10 — Ctrl+S used to commit with the Pull-mode dialog open).
+  if (!$('modal-backdrop').hidden) return;
+  if (key === 's' && !e.shiftKey) {
+    // Context-aware Ctrl+S: save what the active editor holds, else commit.
+    const tab = activeTab();
+    if (tab === 'file') {
+      if (currentFile) saveFile(); // binary file: currentFile is null → nothing to save, and no commit
+    } else if (tab === 'conflict') {
+      if (conflictFile && !$('c-save').disabled) $('c-save').click();
+    } else {
+      doCommit();
+    }
+  } else if (key === 'p' && e.shiftKey) doPush();
+  else if (key === 'p') quickOpen();
 });
 
 $('btn-theme').addEventListener('click', () => {
@@ -1377,6 +1437,8 @@ document.documentElement.dataset.theme = localStorage.getItem('gitnd-theme') || 
 /* =============================================================== events === */
 
 onEvent('file-changed', () => refreshAll());
+// Another client opened a repo: refresh now, so this tab never keeps acting on the old one.
+onEvent('repo-opened', () => { if (repo) refreshAll(); });
 
 // External changes (editor saves, terminal git commands) detected by the
 // server-side watcher. Debounced again here: our own operations also trip it.

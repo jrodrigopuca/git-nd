@@ -6,7 +6,7 @@ Bugs y deuda técnica a resolver. Las decisiones de arquitectura viven en [docs/
 
 **Severidad:** 🔴 seguridad o pérdida de datos · 🟠 rompe un flujo o deja datos inconsistentes · 🟡 menor
 
-Cada ítem se cierra cuando se cumplen **todos** sus criterios de aceptación y hay un test que fallaba antes del arreglo y pasa después.
+Cada ítem se cierra cuando se cumplen **todos** sus criterios de aceptación y hay un test en `test/` que fallaba antes del arreglo, pasa después y corre en CI (`.github/workflows/ci.yml`, en cada push a `main`). Lo que solo se puede ver en el navegador se verifica además con E2E, que se corren a mano.
 
 Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y frontend). "Verificado" indica cómo se confirmó el bug.
 
@@ -15,6 +15,10 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 ## Tanda 1 — seguridad y pérdida de datos
 
 ### B-01 `[x]` 🔴 El token de GitHub se envía a cualquier servidor git
+
+- **Re-cerrado (tanda 2b):** `authFor(tokens)` decide con la URL que isomorphic-git le pasa a `onAuth`, o sea la del pedido real, y todas las operaciones de red pasan `corsProxy: null` (con `undefined`, isomorphic-git lee `http.corsProxy` de la config del repo). `test/credentials-redirect.test.js`: con el código anterior fallaban los 2, ahora pasan. La prueba de QA (`b01.mjs`) da OK con `pushurl` y con `corsProxy`. Su único FAIL restante (`github.com\@evil.com`) es un falso positivo: el host real es `github.com`.
+
+- **Reabierto (verificación QA):** la regla de hosts es correcta, pero se decide con `remote.origin.url` mientras isomorphic-git manda el pedido a otro lado. Con `remote.origin.pushurl=http://atacante`, el push le manda el token. Con `http.corsProxy=http://atacante` en la config del repo, el token le llega en el **fetch automático** y en el push. Reproducido (`b01.mjs`, el atacante recibió el token codificado). Arreglo: decidir con la URL que isomorphic-git le pasa a `onAuth`, y rechazar o ignorar `pushurl`/`corsProxy` hacia hosts sin credenciales.
 
 - **Dónde:** `server/gitService.js` → `authFor`
 - **Descripción:** para todo host que no contenga "gitlab", `authFor` responde al pedido de credenciales con `tokens.github || tokens.gitlab`, incluso por `http://`. Además, cualquier host que contenga "gitlab" (por ejemplo `gitlab.evil.com`) recibe el token de GitLab. Para robar el token alcanza con que el usuario abra un repo cuyo `origin` apunte a un servidor que responda 401: el fetch automático cada 2 minutos lo entrega sin ningún click. Pegar una URL de clone tiene el mismo efecto.
@@ -42,6 +46,10 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ### B-03 `[x]` 🔴 Discard en "Unstaged" borra también lo que está staged
 
+- **Re-cerrado (tanda 2b):** junto con B-19. El escenario de QA está en `test/cache-coherence.test.js`.
+
+- **Reabierto (verificación QA):** la lógica es correcta (binario, CRLF y renombres funcionan), pero a través de la cache vieja de B-19 un discard escribió una versión que el usuario ya había sacado del stage. Se cierra junto con B-19.
+
 - **Dónde:** `server/gitService.js` → `discard`
 - **Descripción:** restaura el archivo desde HEAD con `force`, en lugar de hacerlo desde el índice. Se pierde también el cambio staged, y si el archivo era nuevo y estaba staged, se borra del disco y del índice.
 - **Verificado:** con un cambio staged (`STAGED`) más uno unstaged (`UNSTAGED`), después del discard el índice y el disco quedaron como HEAD.
@@ -55,6 +63,10 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ### B-04 `[x]` 🔴 Al cambiar de repo, Diff y Conflict quedan vivos y actúan sobre el repo nuevo
 
+- **Re-cerrado (tanda 2b):** la UI escucha `repo-opened`, y `refreshAll` cierra las vistas cuando `info.dir` cambia desde afuera. Si había cambios sin guardar en File, avisa que se descartaron. Un flag (`switchingRepo`) evita ese aviso cuando el cambio lo hizo la propia pestaña. E2E de QA con dos clientes (`b04-twoclients-ui.mjs`): con el código anterior B perdía su cambio, ahora pasa todo. **Pendiente:** es solo de navegador, así que no tiene test en `test/`; queda para cuando se pasen los E2E a Playwright.
+
+- **Reabierto (verificación QA):** si el cambio de repo lo hace **otro cliente** (otra pestaña, `curl`, un script), la pestaña 1 refresca y muestra B, pero el Diff de A sigue abierto, y "Discard" borró el cambio de B. Reproducido en el navegador (`b04-twoclients-ui.mjs`). Causa: la UI no escucha `repo-opened` y `refreshAll` no cierra las vistas cuando cambia `info.dir`.
+
 - **Dónde:** `public/js/app.js` → `openRepo` y `go()` en `cloneModal`
 - **Descripción:** al cambiar de repo se cierra la pestaña File, pero Diff y Conflict quedan abiertas. Sus botones guardan la ruta y el índice del hunk del repo anterior, y el pedido va al repo abierto ahora. "Discard hunk" sobre un diff del repo A borra cambios en B. En Conflict, "Save" escribiría la resolución de A dentro de B.
 - **Verificado:** reproducido en el navegador. B perdió `B-CHANGED-MUST-SURVIVE`.
@@ -65,6 +77,18 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Cerrado:** `closeRepoViews()` (File + Diff + Conflict) al abrir y al clonar. Test en Chrome headless (scratchpad `e2e/batch1-ui.mjs`): con el código anterior fallaban 4 comprobaciones de pestañas, con el arreglo pasan las 11. El camino de clonar usa la misma función, pero no se probó en el navegador.
 
 ### B-05 `[x]` 🔴 Las operaciones de hunks corrompen archivos sin salto de línea final
+
+- **Re-cerrado (tanda 2b):** los tres casos quedan resueltos.
+  1. La marca de jsdiff se respeta solo si el texto del que viene la línea `+` realmente termina sin salto (jsdiff la emite también cuando el otro lado está vacío).
+  2. Los blobs se decodifican con `TextDecoder('utf-8', { ignoreBOM: true })`.
+  3. Si se hace unstage de todos los hunks de un archivo nuevo, se saca la entrada del índice.
+
+  En `test/hunks.test.js`, los 3 casos nuevos fallaban con el código anterior y ahora pasan. Los FAIL de "stage-all (crlf/bom)" en `merge-hunks.mjs` de QA son un artefacto de su script: compara contra la salida de git con `.trim()`, que también borra el `\r` final y el BOM.
+
+- **Reabierto (verificación QA):** quedan tres casos borde, todos reproducidos:
+  1. Discard del hunk de un archivo **borrado** lo restaura sin el salto final.
+  2. Un archivo con **BOM UTF-8**: `TextDecoder` le saca el BOM, aparece un hunk fantasma en la línea 1, y el stage/discard borra el BOM.
+  3. Unstage de todos los hunks de un archivo **nuevo** deja un blob vacío en el índice; `git restore --staged` saca la entrada.
 
 - **Dónde:** `server/gitService.js` → `applyHunks` y `hunkRows`
 - **Descripción:** `jsdiff` emite la marca `\ No newline at end of file`, y el código la trata como una línea de contexto. Stage, unstage y discard de un hunk escriben el texto literal `No newline at end of file` adentro del archivo. La vista de hunks también muestra la marca como si fuera una línea más.
@@ -77,6 +101,10 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Cerrado:** `applyHunks` trabaja con líneas que conservan su terminador, y la marca le saca el `\n` a la línea anterior. `test/hunks.test.js`: aplicar todos los hunks tiene que dar lo mismo que `git add` / `git restore` / `git restore --staged`, en 6 casos más uno de selección parcial. Antes fallaban 13 de 20, ahora pasan los 20.
 
 ### B-06 `[x]` 🔴 El merge en curso se pierde al reabrir el repo o reiniciar el servidor
+
+- **Re-cerrado (tanda 2b):** todas las funciones que consultan el estado del merge vuelven a leer `.git/MERGE_HEAD` antes de decidir. Son 13: info, status, stage, commit, amend, cambio de rama, pull, merge, cherry-pick/revert, detalle, resolución, completar y abortar. Así, Abort sobre un merge que ya terminó responde "No merge in progress" y no hace el checkout forzado. Test nuevo en `test/merge-persist.test.js`: con el código anterior falla, ahora pasa.
+
+- **Reabierto (verificación QA):** si el merge se termina desde la **terminal** (`git commit` borra `MERGE_HEAD`), la app sigue con el merge en memoria: banner, commit rechazado, cambio de rama bloqueado. Si después se aprieta **Abort**, el checkout forzado **destruye trabajo nuevo sin commitear**. Reproducido (`recheck.mjs`). Arreglo: tomar `.git/MERGE_HEAD` como única fuente de verdad (releerlo antes de cada operación de merge), no la copia en memoria.
 
 - **Dónde:** `server/state.js` (`open` resetea `merge`) y `server/gitService.js` (merge y commit)
 - **Descripción:** el estado del merge con conflictos vive solo en memoria. Si se reabre el repo o se reinicia el servidor, la marca de conflicto desaparece y el siguiente commit queda como un commit normal, con un solo padre y con los marcadores `<<<<<<<` adentro.
@@ -106,28 +134,37 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ## Tanda 2 — flujos rotos y endurecimiento
 
-### B-08 `[ ]` 🟠 Un repo vacío (sin commits) nunca se muestra
+### B-08 `[x]` 🟠 Un repo vacío (sin commits) nunca se muestra
+
+- **Cerrado (tanda 2b):** el criterio 3 se completó con B-21. E2E de QA (`b08-ui.mjs`): un panel que falla (índice corrupto, o sync contra un objeto inexistente) deja actualizados los demás y no muestra nada del repo anterior. Con el código anterior fallaban 8 comprobaciones, ahora pasan las 13.
 
 - **Dónde:** `public/js/app.js` → `refreshAll`; `server/gitService.js` → `history`
 - **Descripción:** `history` falla con `NotFoundError` cuando no hay commits, y eso tumba el `Promise.all` de `refreshAll`. El repo vacío no se dibuja y queda en pantalla el repo anterior, con botones que actúan sobre el vacío.
 - **Verificado:** `history` lanza `NotFoundError: Could not find refs/heads/main` en un repo recién creado.
 - **Criterios de aceptación:**
-  - [ ] Abrir un repo sin commits muestra el repo (nombre, rama), "No commits" en el grafo, y los archivos nuevos en Changes y en el árbol.
-  - [ ] El primer commit en ese repo funciona y aparece en el grafo.
-  - [ ] Si una parte del refresco falla, el resto de los paneles igual se actualizan, y nunca queda en pantalla otro repo.
+  - [x] Abrir un repo sin commits muestra el repo (nombre, rama), "No commits" en el grafo, y los archivos nuevos en Changes y en el árbol.
+  - [x] El primer commit en ese repo funciona y aparece en el grafo.
+  - [ ] Si una parte del refresco falla, el resto de los paneles igual se actualizan, y nunca queda en pantalla otro repo. *(Implementado con `Promise.allSettled` y paneles vacíos en caso de falla; falta un test que fuerce la falla de un panel.)*
+- **Hallazgo al implementar:** el **primer commit** de un repo nuevo también fallaba ("Nothing staged"). Mientras `.git/index` no existe, isomorphic-git guarda en la cache "índice vacío" y nunca detecta cuando aparece. Era una regresión de la cache por repo del ADR-0001. Arreglo: `repoState.gitCache()` devuelve una cache descartable mientras no exista el índice.
+- **Avance:** `history` devuelve `[]` sin commits; `refreshAll` usa `allSettled`. `test/empty-repo.test.js`: con el código anterior falla, ahora pasa. En Chrome (scratchpad `e2e/batch2-ui.mjs`), 5 comprobaciones de B-08: con el código anterior fallaban 4, ahora pasan las 5.
 
-### B-09 `[ ]` 🟠 Un symlink dentro del repo escapa de `safePath`
+### B-09 `[x]` 🟠 Un symlink dentro del repo escapa de `safePath`
 
 - **Dónde:** `server/state.js` → `safePath`
 - **Descripción:** `safePath` compara strings con `path.resolve` sin resolver symlinks. Un repo que trae `link -> ~/.ssh` (isomorphic-git los crea como symlinks reales) permite leer, listar y escribir fuera del repo desde el editor, el árbol y los hunks.
 - **Verificado:** las dos revisiones lo reprodujeron: lectura, listado y escritura de un archivo fuera del repo.
 - **Criterios de aceptación:**
-  - [ ] Leer, escribir, listar o aplicar hunks a través de un symlink que apunta fuera del repo responde 403.
-  - [ ] Un symlink que apunta dentro del repo sigue funcionando, o se muestra como link sin seguirlo (decidir al implementar).
-  - [ ] Escribir un archivo nuevo debajo de un directorio symlinkeado hacia afuera también se rechaza.
-  - [ ] Tests de los tres casos.
+  - [x] Leer, escribir, listar o aplicar hunks a través de un symlink que apunta fuera del repo responde 403.
+  - [x] Un symlink que apunta dentro del repo sigue funcionando, o se muestra como link sin seguirlo (decidir al implementar).
+  - [x] Escribir un archivo nuevo debajo de un directorio symlinkeado hacia afuera también se rechaza.
+  - [x] Tests de los tres casos.
+- **Cerrado:**
+  - **Toda ruta:** `safePath` exige que el directorio padre real quede dentro del repo.
+  - **Con `follow: true`** (leer, escribir, listar, diff y hunks) también resuelve el último componente. Un symlink hacia afuera o colgante se rechaza.
+  - **Decisión:** un link hacia adentro funciona. Stage y discard operan sobre el link sin seguirlo, como git, que versiona el link y no su destino.
+  - `test/paths.test.js`: antes fallaban 4 de 6, ahora pasan los 6.
 
-### B-10 `[ ]` 🟠 Los atajos de teclado actúan con un modal abierto
+### B-10 `[x]` 🟠 Los atajos de teclado actúan con un modal abierto
 
 - **Dónde:** `public/js/app.js` → listener de `keydown`
 - **Descripción:** Ctrl/Cmd+S commitea, y Ctrl/Cmd+Shift+P pushea, aunque haya un modal abierto (Pull mode, Tag, PR, Issue, una confirmación). También pasan cosas raras según el contexto:
@@ -135,37 +172,94 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
   - Con un archivo binario abierto, Ctrl+S cae en commit.
 - **Verificado:** reproducido en el navegador. Se creó un commit con el modal de Pull mode abierto.
 - **Criterios de aceptación:**
-  - [ ] Con un modal abierto, Ctrl+S, Ctrl+Shift+P y Ctrl+P no hacen nada (o actúan solo dentro del modal).
-  - [ ] En la pestaña Conflict, Ctrl+S guarda la resolución.
-  - [ ] Con un binario abierto en File, Ctrl+S no commitea.
+  - [x] Con un modal abierto, Ctrl+S, Ctrl+Shift+P y Ctrl+P no hacen nada (o actúan solo dentro del modal).
+  - [x] En la pestaña Conflict, Ctrl+S guarda la resolución.
+  - [x] Con un binario abierto en File, Ctrl+S no commitea.
+- **Cerrado:** el listener ignora los atajos con el modal abierto. Ctrl+S depende de la pestaña: File guarda (nada si es binario), Conflict guarda la resolución y en el resto commitea. También se cancela el diálogo de Guardar/Imprimir del navegador. En Chrome (`e2e/batch2-ui.mjs`), con el código anterior fallaban 3 comprobaciones y ahora pasan las 5. Ctrl+Shift+P y Ctrl+P con el modal abierto quedaron verificados solo leyendo el código.
 
-### B-11 `[ ]` 🟠 Stage de un hunk le saca el bit ejecutable al archivo
+### B-11 `[x]` 🟠 Stage de un hunk le saca el bit ejecutable al archivo
 
 - **Dónde:** `server/gitService.js` → `updateIndex` en las operaciones de hunks
 - **Descripción:** `updateIndex` se llama sin `mode`, así que queda 100644. Un script `chmod +x` pierde el bit ejecutable en el siguiente commit.
 - **Verificado:** reproducido por la revisión (`mode change 100755 => 100644`).
 - **Criterios de aceptación:**
-  - [ ] Stage y unstage de hunks conservan el modo del archivo (100755 queda 100755).
-  - [ ] Test con un archivo ejecutable.
+  - [x] Stage y unstage de hunks conservan el modo del archivo (100755 queda 100755).
+  - [x] Test con un archivo ejecutable.
+- **Cerrado:** `writeIndex` usa el modo de la entrada del índice, como `git apply --cached`, y para un archivo nuevo el bit ejecutable del disco. `test/hunk-mode.test.js`: antes fallaban 2 de 3, ahora pasan los 3.
 
-### B-12 `[ ]` 🟠 Un GET sin `Origin` pasa el filtro anti-CSRF
+### B-12 `[x]` 🟠 Un GET sin `Origin` pasa el filtro anti-CSRF
+
+- **Re-cerrado (tanda 2b):** el chequeo compara la ruta como la resuelve Express, decodificada y en minúsculas. `/API/`, `/Api/`, `/%61pi/` y `/%41PI/` sin el header ya no responden 200 (test nuevo en `test/http-csrf.test.js`: fallaba, ahora pasa).
+
+- **Reabierto (verificación QA):** Express no distingue mayúsculas en las rutas, pero el chequeo del header sí. `GET /API/...` y `POST /API/repo/stage` sin `X-GitND` responden 200. Verificado de nuevo: `/API/auth/status` y `/Api/auth/status` sin header devuelven 200.
 
 - **Dónde:** `server/index.js` → `isAllowedOrigin`; `server/routes/repo.js` → `/api/repo/sync?fetch=1`
 - **Descripción:** los GET cross-site (`<img>`, `<script>`) no mandan `Origin` y el filtro los deja pasar. Una web cualquiera puede disparar GETs con efectos, como `/api/repo/sync?fetch=1`, que hace un fetch de red. No puede leer la respuesta, pero sumado a B-01 eso entregaba el token.
 - **Verificado:** leyendo el código. El agente de seguridad lo marcó.
 - **Criterios de aceptación:**
-  - [ ] Ningún GET tiene efectos: el fetch pasa a `POST`.
-  - [ ] Los pedidos a `/api/*` con `Sec-Fetch-Site: cross-site` se rechazan.
-  - [ ] Defensa adicional: `/api/*` exige un header propio (por ejemplo `X-GitND: 1`) que una web no puede mandar sin preflight, y la UI lo envía siempre.
+  - [x] Ningún GET tiene efectos: el fetch pasa a `POST`.
+  - [x] Los pedidos a `/api/*` con `Sec-Fetch-Site: cross-site` se rechazan.
+  - [x] Defensa adicional: `/api/*` exige un header propio (por ejemplo `X-GitND: 1`) que una web no puede mandar sin preflight, y la UI lo envía siempre.
+- **Cerrado:**
+  - El fetch pasa a `POST /api/repo/sync/fetch`, y `GET /api/repo/sync` ya no hace fetch nunca.
+  - Se rechaza `Sec-Fetch-Site` con un valor distinto de `same-origin`/`none`, lo que incluye `same-site`: otro puerto de localhost.
+  - `X-GitND: 1` es obligatorio en `/api/*`. Las rutas `/auth/*` y la página quedan afuera, porque son navegaciones.
+  - `test/http-csrf.test.js` levanta el servidor real: antes fallaban 3 de 5, ahora pasan los 5.
+  - **Cambio de comportamiento:** los scripts y `curl` contra la API ahora tienen que mandar `-H 'X-GitND: 1'`.
 
-### B-13 `[ ]` 🟠 `.git/` se puede leer y escribir desde el editor de archivos
+### B-13 `[x]` 🟠 `.git/` se puede leer y escribir desde el editor de archivos
+
+- **Re-cerrado (tanda 2b):** ningún componente de la ruta puede ser `.git`, con lo que también quedan cubiertos los repos anidados. La regla se aplica además sobre la **ruta real**: el directorio padre resuelto y, con `follow`, el destino del link. Test nuevo en `test/paths.test.js`: fallaba, ahora pasa. La prueba de QA (`paths.mjs`) da 28 de 29 OK. El que falta recibe un 400 ("los symlinks no tienen hunks", por B-20) en lugar del 403 que esperaba, y el resultado es el mismo: `.git/config` queda intacto.
+
+- **Reabierto (verificación QA):** un symlink **dentro** del repo que apunta a `.git` pasa el chequeo, que es léxico sobre el primer componente y no sobre la ruta real. Con `cfg -> .git/config` y `gdir -> .git` se pudo leer, escribir, listar, ver el diff y hacer discard de hunks sobre `.git/config` y `.git/hooks/pre-commit`; un discard de hunk **vació** `.git/config`. El `.git` de un repo anidado (`nested/.git/config`) también queda expuesto. Reproducido (`paths.mjs`).
 
 - **Dónde:** `server/state.js` → `safePath`; `server/gitService.js` → `readFile`/`writeFile`
 - **Descripción:** el editor puede abrir y guardar `.git/config`, lo que permite cambiar la URL del remote y alimenta B-01.
 - **Verificado:** leyendo el código.
 - **Criterios de aceptación:**
-  - [ ] Leer y escribir rutas dentro de `.git/` desde la API de archivos responde 403.
-  - [ ] El árbol de archivos no muestra `.git/`, como hasta ahora.
+  - [x] Leer y escribir rutas dentro de `.git/` desde la API de archivos responde 403.
+  - [x] El árbol de archivos no muestra `.git/`, como hasta ahora.
+- **Cerrado:** `safePath` rechaza cualquier ruta cuyo primer componente sea `.git`, sin distinguir mayúsculas (`.GIT` en macOS) y también después de normalizar (`sub/../.git`). `.gitignore` sigue accesible. Está en `test/paths.test.js`.
+
+---
+
+## Tanda 2b — hallazgos de la verificación
+
+### B-19 `[x]` 🔴 La cache compartida no ve las escrituras de índice de la propia app
+
+- **Dónde:** `server/state.js` (`gitCache`) y las llamadas `git.add` / `git.remove` / `git.resetIndex` / `git.updateIndex` en `server/gitService.js`
+- **Descripción:** esas funciones escriben el índice **sin** la cache compartida. isomorphic-git detecta que el índice cambió comparando segundos, inode y tamaño, así que una escritura del mismo tamaño dentro del mismo segundo le pasa inadvertida. Consecuencias deterministas:
+  - stage → status → unstage → commit crea un **commit vacío**;
+  - un discard escribe una versión vieja que el usuario ya había sacado del stage, y se pierde la edición (por eso B-03 queda parcial).
+  Los cambios hechos desde la terminal sí se ven bien (verificado: add, commit, reset, checkout, stash, gc).
+- **Verificado:** reproducido (`cache3.mjs`). Con la cache desactivada, o con 1,1 s entre pasos, pasa.
+- **Criterios de aceptación:**
+  - [x] Toda lectura y escritura del índice de la app usa la misma cache, o la cache se invalida en cada escritura de la app.
+  - [x] stage → unstage → commit en el mismo segundo se rechaza ("Nothing staged").
+  - [x] El escenario de discard de `cache3.mjs` restaura la versión staged.
+  - [x] Test que encadena operaciones sin esperas.
+- **Cerrado:** `gitService.js` envuelve isomorphic-git en un `Proxy` que inyecta la cache del repo abierto en **todas** sus llamadas sobre ese repo, lecturas y escrituras. Así una escritura actualiza la copia que lee la llamada siguiente. Las llamadas a otro directorio, por ejemplo el destino de un clon, quedan como están. `test/cache-coherence.test.js`: con el código anterior fallaban los 4, ahora pasan. Las pruebas de cache de QA (`cache`, `cache2`, `cache3`) quedan todas OK, incluidos los cambios hechos desde la terminal y `gc`.
+- **Límite que queda:** isomorphic-git detecta cambios por segundos, inode y tamaño. Un cambio **externo** del mismo tamaño dentro del mismo segundo que una lectura de la app podría pasar inadvertido hasta la próxima escritura. En las pruebas de QA no apareció.
+
+### B-20 `[x]` 🟠 Las operaciones de hunks siguen los symlinks y corrompen el link
+
+- **Dónde:** `server/gitService.js` → `hunkTexts` / `applyHunkOp`
+- **Descripción:** para un symlink sin cambios aparece un hunk (el contenido del destino comparado con el blob del link), y al stagearlo el blob del link se reemplaza por el contenido del archivo. Afecta también el modo (B-11).
+- **Verificado:** reproducido (`mode.mjs`).
+- **Criterios de aceptación:**
+  - [x] Los symlinks no ofrecen hunks: se tratan como una entrada entera (stage/discard del link).
+  - [x] Test con un symlink versionado sin cambios y con el destino cambiado.
+- **Cerrado:** `fileHunks` devuelve `{ hunks: [], symlink: true }`, y la vista lo explica. `applyHunkOp` rechaza las operaciones con 400. Los dos chequean si es un link antes de leer cualquier contenido, en el disco y en el índice. `test/hunk-symlink.test.js`: con el código anterior fallaban 2 de 3, ahora pasan los 3.
+
+### B-21 `[x]` 🟠 Tras un panel que falla quedan datos del repo anterior (badges de sync, stash)
+
+- **Dónde:** `public/js/app.js` → `refreshSync`, `refreshStash`
+- **Descripción:** completa el criterio pendiente de B-08. Si `/api/repo/sync` falla en el repo nuevo, el badge de push sigue mostrando el "2" del repo anterior: `refreshSync` sale temprano y deja los badges. `refreshStash` hace lo mismo con la lista de stash (esto último verificado solo leyendo).
+- **Verificado:** reproducido en el navegador (`b08-ui.mjs`).
+- **Criterios de aceptación:**
+  - [x] Si sync o stash fallan, sus paneles se vacían; nunca quedan con datos de otro repo.
+  - [x] Test E2E que fuerza la falla de un endpoint (por ejemplo con `page.route`).
+- **Cerrado:** `refreshSync` y `refreshStash` vacían sus paneles cuando el pedido falla. E2E de QA (`b08-ui.mjs`, que hace fallar el endpoint corrompiendo el repo, no con `page.route`): con el código anterior fallaba, ahora pasa. **Pendiente:** pasarlo a Playwright dentro del repo.
 
 ---
 

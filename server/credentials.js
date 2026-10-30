@@ -49,7 +49,20 @@ export function credentialsFor(url, tokens = {}) {
   return null;
 }
 
-/** isomorphic-git `onAuth` callback: the matching token, or cancel. */
-export function authFor(url, tokens = {}) {
-  return () => credentialsFor(url, tokens) || { cancel: true };
+/**
+ * isomorphic-git `onAuth` callback: the token for the URL ACTUALLY being
+ * requested (isomorphic-git passes it), or cancel. Deciding from
+ * remote.origin.url instead let a repo's `pushurl` receive the token meant
+ * for origin's host (BACKLOG B-01, reopened).
+ */
+export function authFor(tokens = {}) {
+  return (requestUrl) => credentialsFor(requestUrl, tokens) || { cancel: true };
 }
+
+/**
+ * Network options for every clone/fetch/push. `corsProxy: null` (not
+ * undefined) stops isomorphic-git from reading `http.corsProxy` from the repo
+ * config: a proxy chosen by the repo would see the requests, and a token sent
+ * "to github.com" would travel to the proxy (BACKLOG B-01, reopened).
+ */
+export const NO_REPO_PROXY = { corsProxy: null };

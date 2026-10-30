@@ -2,15 +2,40 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import git from 'isomorphic-git';
+import isoGit from 'isomorphic-git';
 import http from 'isomorphic-git/http/node';
 import * as Diff from 'diff';
 import { repoState, AppError } from './state.js';
 import { getSettings, saveSettings } from './settings.js';
 import { tokenStore } from './tokenStore.js';
 import { createHash } from 'node:crypto';
-import { authFor } from './credentials.js'; // onAuth for push/pull/clone: exact host + https only
+// onAuth for push/pull/clone (exact host + https, from the URL actually requested),
+// and the network options that keep a repo-configured proxy out of the way.
+import { authFor, NO_REPO_PROXY } from './credentials.js';
 import { partitionReachable, GraphWalk } from './commitWalk.js';
+
+/**
+ * isomorphic-git with the open repo's shared cache injected into EVERY call
+ * on that repo — reads and writes alike (BACKLOG B-19). Reads used the cache
+ * while git.add/remove/resetIndex/updateIndex wrote the index without it;
+ * isomorphic-git spots a changed index by mtime in seconds + inode + size, so
+ * a same-size write in the same second was invisible to the next cached read
+ * (an empty commit after unstage, a discard restoring a stale version).
+ * Going through the same cache, a write updates the copy the next read uses.
+ * Calls on another dir (a clone target) or with an explicit `cache` are left
+ * as they are; argument-less helpers (git.STAGE()) pass straight through.
+ */
+const git = new Proxy(isoGit, {
+  get(target, key) {
+    const value = target[key];
+    if (typeof value !== 'function') return value;
+    return (args, ...rest) => {
+      const injectable = args && typeof args === 'object' && !('cache' in args)
+        && repoState.dir && args.dir === repoState.dir;
+      return value.call(target, injectable ? { ...args, cache: repoState.gitCache() } : args, ...rest);
+    };
+  },
+});
 
 const IGNORED_DIRS = new Set(['.git']);
 
@@ -19,12 +44,12 @@ const IGNORED_DIRS = new Set(['.git']);
 
 /** Fetch all branches; if the remote HEAD dangles, fall back to just ours. */
 async function fetchRemote(dir, remote, url, tokens, branch) {
-  const onAuth = authFor(url, tokens);
+  const onAuth = authFor(tokens);
   try {
-    await git.fetch({ fs, http, dir, remote, onAuth });
+    await git.fetch({ fs, http, dir, remote, onAuth, ...NO_REPO_PROXY });
   } catch (err) {
     if (err.code === 'NotFoundError' && branch) {
-      await git.fetch({ fs, http, dir, remote, onAuth, ref: branch, singleBranch: true });
+      await git.fetch({ fs, http, dir, remote, onAuth, ref: branch, singleBranch: true, ...NO_REPO_PROXY });
     } else {
       throw err;
     }
@@ -80,7 +105,7 @@ export async function cloneRepo(url, targetDir, tokens) {
     throw new AppError(`Target directory is not empty: ${dir}`, 400);
   }
   await fsp.mkdir(dir, { recursive: true });
-  await git.clone({ fs, http, dir, url, onAuth: authFor(url, tokens) });
+  await git.clone({ fs, http, dir, url, onAuth: authFor(tokens), ...NO_REPO_PROXY });
   repoState.open(dir);
   return dir;
 }
@@ -92,6 +117,9 @@ export async function currentBranch() {
 
 export async function repoInfo() {
   const dir = repoState.requireRepo();
+  // .git/MERGE_HEAD on disk is the source of truth, not the copy in memory:
+  // a merge finished (or started) from a terminal must show here (BACKLOG B-06).
+  await loadMergeState(dir);
   const [branch, remotes] = await Promise.all([
     currentBranch(),
     git.listRemotes({ fs, dir }).catch(() => []),
@@ -113,6 +141,7 @@ const FILE = 0, HEAD = 1, WORKDIR = 2, STAGE = 3;
 
 export async function status() {
   const dir = repoState.requireRepo();
+  await loadMergeState(dir); // MERGE_HEAD is the source of truth (B-06)
   const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
   const files = [];
   for (const row of matrix) {
@@ -147,6 +176,7 @@ export async function status() {
 
 export async function stage(filepath) {
   const dir = repoState.requireRepo();
+  await loadMergeState(dir); // MERGE_HEAD is the source of truth (B-06)
   const rel = repoState.relPath(filepath);
   const abs = repoState.safePath(filepath);
   if (fs.existsSync(abs)) {
@@ -238,6 +268,7 @@ async function resolveAuthor(dir, author) {
 
 export async function commit({ message, author }) {
   const dir = repoState.requireRepo();
+  await loadMergeState(dir); // MERGE_HEAD is the source of truth (B-06)
   // Merge commits have a sensible default message ("Merge <ref>").
   if (!message?.trim() && !repoState.merge) throw new AppError('Commit message is required', 400);
   const who = await resolveAuthor(dir, author);
@@ -311,8 +342,19 @@ const mapCommit = (c) => ({
 
 export async function history({ depth = 100, ref } = {}) {
   const dir = repoState.requireRepo();
+  if (!ref && !(await hasCommits(dir))) return []; // new repo: empty history, not an error (BACKLOG B-08)
   const commits = await git.log({ fs, dir, depth: Number(depth), ref: ref || undefined, cache: repoState.gitCache() });
   return commits.map(mapCommit);
+}
+
+/** False for a freshly initialized repo, whose HEAD points at a branch with no commits yet. */
+async function hasCommits(dir) {
+  try {
+    await git.resolveRef({ fs, dir, ref: 'HEAD' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* --------------------------------------------------------------- graph --- */
@@ -446,7 +488,7 @@ async function applyDelta(dir, files, targetOid, guardOid, headOid) {
 
 async function replayCommitOp(oid, author, mode) {
   const dir = repoState.requireRepo();
-  if (repoState.merge) throw new AppError('A merge is in progress: resolve or abort it first', 409);
+  if (await loadMergeState(dir)) throw new AppError('A merge is in progress: resolve or abort it first', 409);
   oid = await git.expandOid({ fs, dir, oid }); // accept short hashes too
   await requireCleanTree(dir);
   const branch = await git.currentBranch({ fs, dir, fullname: false });
@@ -494,7 +536,7 @@ export const cherryPick = (oid, author) => replayCommitOp(oid, author, 'cherry-p
 /** Rewrite the branch tip: same parents, current index, new/old message. */
 export async function amendCommit({ message, author }) {
   const dir = repoState.requireRepo();
-  if (repoState.merge) throw new AppError('Cannot amend during a merge', 409);
+  if (await loadMergeState(dir)) throw new AppError('Cannot amend during a merge', 409);
   const branch = await git.currentBranch({ fs, dir, fullname: false });
   if (!branch) throw new AppError('Detached HEAD: cannot amend', 400);
   const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
@@ -547,11 +589,11 @@ export async function deleteTag(name) {
 
 export async function pushTag(name, tokens) {
   const dir = repoState.requireRepo();
-  const url = await remoteUrl(dir, 'origin');
+  await remoteUrl(dir, 'origin'); // clear error if there is no origin
   await git.push({
     fs, http, dir, remote: 'origin',
     ref: `refs/tags/${name}`, remoteRef: `refs/tags/${name}`,
-    onAuth: authFor(url, tokens),
+    onAuth: authFor(tokens), ...NO_REPO_PROXY,
   });
 }
 
@@ -589,7 +631,7 @@ export async function createBranch(name, checkout = true) {
 
 export async function switchBranch(name) {
   const dir = repoState.requireRepo();
-  if (repoState.merge) throw new AppError('A merge is in progress: resolve or abort it first', 409);
+  if (await loadMergeState(dir)) throw new AppError('A merge is in progress: resolve or abort it first', 409);
 
   // Checking out a remote branch (origin/x) creates/uses the local branch "x".
   const prefix = name.split('/')[0];
@@ -623,9 +665,9 @@ export async function deleteBranch(name) {
 export async function push({ remote = 'origin', tokens }) {
   const dir = repoState.requireRepo();
   const branch = await currentBranch();
-  const url = await remoteUrl(dir, remote);
+  await remoteUrl(dir, remote); // clear error if the remote does not exist
   const res = await git.push({
-    fs, http, dir, remote, ref: branch, onAuth: authFor(url, tokens),
+    fs, http, dir, remote, ref: branch, onAuth: authFor(tokens), ...NO_REPO_PROXY,
   });
   if (res.error) throw new AppError(`Push rejected: ${res.error}`, 422);
   return { branch, remote };
@@ -775,7 +817,7 @@ async function doMerge(theirRef, author) {
 
 export async function pull({ remote = 'origin', tokens, author, rebase = false }) {
   const dir = repoState.requireRepo();
-  if (repoState.merge) throw new AppError('A merge is in progress: resolve or abort it first', 409);
+  if (await loadMergeState(dir)) throw new AppError('A merge is in progress: resolve or abort it first', 409);
   const branch = await currentBranch();
   const url = await remoteUrl(dir, remote);
   const who = await resolveAuthor(dir, author);
@@ -905,7 +947,7 @@ async function rebaseOnto(branch, theirRef) {
 
 export async function mergeBranch({ theirRef, author }) {
   const dir = repoState.requireRepo();
-  if (repoState.merge) throw new AppError('A merge is in progress: resolve or abort it first', 409);
+  if (await loadMergeState(dir)) throw new AppError('A merge is in progress: resolve or abort it first', 409);
   const who = await resolveAuthor(dir, author);
   return doMerge(theirRef, who);
 }
@@ -929,7 +971,7 @@ export async function compareRefs(base, head) {
 /** Full picture of the in-progress merge for the Merge view. */
 export async function mergeDetail() {
   const dir = repoState.requireRepo();
-  const m = repoState.merge;
+  const m = await loadMergeState(dir); // MERGE_HEAD is the source of truth (B-06)
   if (!m) return { active: false };
 
   const ours = await currentBranch();
@@ -965,9 +1007,8 @@ export async function mergeDetail() {
  * tree with no merge, partly undoing the abort (BACKLOG B-07).
  */
 export async function resolveConflict(filepath, content) {
-  repoState.requireRepo();
   const rel = repoState.relPath(filepath);
-  const merge = repoState.merge;
+  const merge = await loadMergeState(repoState.requireRepo()); // MERGE_HEAD is the source of truth (B-06)
   if (!merge) throw new AppError('No merge in progress: nothing to resolve', 409);
   if (!merge.files.includes(rel)) throw new AppError(`${rel} is not in conflict in this merge`, 409);
   if (/^(<{7}|={7}|>{7})( |$)/m.test(content)) throw new AppError('There are still conflict markers left', 400);
@@ -978,7 +1019,7 @@ export async function resolveConflict(filepath, content) {
 
 export async function completeMerge({ message, author }) {
   const dir = repoState.requireRepo();
-  const merge = repoState.merge;
+  const merge = await loadMergeState(dir); // MERGE_HEAD is the source of truth (B-06)
   if (!merge) throw new AppError('No merge in progress', 400);
   const pending = merge.files.filter((f) => !merge.resolved.includes(f));
   if (pending.length > 0) {
@@ -998,7 +1039,9 @@ export async function completeMerge({ message, author }) {
 
 export async function abortMerge() {
   const dir = repoState.requireRepo();
-  if (!repoState.merge) throw new AppError('No merge in progress', 400);
+  // Re-read from disk first: aborting a merge that already ended (finished
+  // from a terminal) force-checked-out and destroyed newer work (B-06).
+  if (!(await loadMergeState(dir))) throw new AppError('No merge in progress', 400);
   const branch = await currentBranch();
   await git.checkout({ fs, dir, ref: branch, force: true });
   await clearMergeState(dir);
@@ -1006,11 +1049,19 @@ export async function abortMerge() {
 
 /* ---------------------------------------------------------------- diff --- */
 
+/**
+ * Blob bytes → text, keeping a UTF-8 BOM. TextDecoder strips it by default
+ * while the working file is read with the BOM, so line 1 showed a phantom
+ * change and staging dropped the BOM (BACKLOG B-05).
+ */
+const utf8KeepBom = new TextDecoder('utf-8', { ignoreBOM: true });
+const decodeText = (bytes) => utf8KeepBom.decode(bytes);
+
 async function headContent(dir, rel) {
   try {
     const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
     const { blob } = await git.readBlob({ fs, dir, oid: headOid, filepath: rel });
-    return new TextDecoder().decode(blob);
+    return decodeText(blob);
   } catch {
     return ''; // new file
   }
@@ -1019,7 +1070,7 @@ async function headContent(dir, rel) {
 const blobText = async (dir, oid, rel) => {
   try {
     const { blob } = await git.readBlob({ fs, dir, oid, filepath: rel });
-    return new TextDecoder().decode(blob);
+    return decodeText(blob);
   } catch {
     return ''; // file absent at that commit
   }
@@ -1050,7 +1101,7 @@ export async function diffFile(filepath, oid, base) {
     return { filepath: rel, oid, rows: sideBySideRows(oldText, newText) };
   }
 
-  const abs = repoState.safePath(filepath);
+  const abs = repoState.safePath(filepath, { follow: true });
   const oldText = await headContent(dir, rel);
   const newText = fs.existsSync(abs) ? await fsp.readFile(abs, 'utf8') : '';
   return { filepath: rel, rows: sideBySideRows(oldText, newText) };
@@ -1118,7 +1169,7 @@ async function indexBlobText(dir, rel) {
   });
   if (!oid) return null;
   const { blob } = await git.readBlob({ fs, dir, oid });
-  return new TextDecoder().decode(blob);
+  return decodeText(blob);
 }
 
 const assertText = (text, rel) => {
@@ -1164,12 +1215,16 @@ const splitKeepEol = (text) => text.match(/[^\n]*\n|[^\n]+$/g) || [];
  * that marker only strips the "\n" from the previous line (BACKLOG B-05 —
  * it used to be written into the file as text).
  */
-function hunkLines(h) {
+function hunkLines(h, plusText) {
   const lines = [];
   for (const line of h.lines) {
     if (line[0] === '\\') {
       const last = lines[lines.length - 1];
-      if (last) last[1] = last[1].replace(/\n$/, '');
+      // jsdiff also emits the marker when the OTHER side is empty
+      // ("a\nb\n" → "" marks "-b"), so trust it only when the side the line
+      // comes from really ends without "\n". Only "+" lines matter: context
+      // lines copy the file's own bytes and "-" lines are skipped.
+      if (last && (last[0] !== '+' || !plusText.endsWith('\n'))) last[1] = last[1].replace(/\n$/, '');
     } else {
       lines.push([line[0], `${line.slice(1)}\n`]);
     }
@@ -1177,8 +1232,11 @@ function hunkLines(h) {
   return lines;
 }
 
-/** Apply the selected hunks (by index) onto oldText; unselected hunks are skipped. Byte-exact. */
-function applyHunks(oldText, hunks, selected) {
+/**
+ * Apply the selected hunks (by index) onto oldText; unselected hunks are
+ * skipped. Byte-exact. `plusText` is the text the "+" lines come from.
+ */
+function applyHunks(oldText, hunks, selected, plusText) {
   const oldLines = splitKeepEol(oldText);
   const out = [];
   let cursor = 0;
@@ -1188,7 +1246,7 @@ function applyHunks(oldText, hunks, selected) {
     out.push(...oldLines.slice(cursor, start));
     cursor = start;
     if (!selected.includes(i)) return; // leave the old content untouched
-    for (const [tag, text] of hunkLines(h)) {
+    for (const [tag, text] of hunkLines(h, plusText)) {
       if (tag === '+') out.push(text);
       else if (tag === '-') cursor++;
       else { out.push(oldLines[cursor]); cursor++; } // context: keep the file's own bytes
@@ -1222,10 +1280,27 @@ function computeHunks(oldText, newText, rel) {
   return Diff.structuredPatch(rel, rel, oldText, newText, '', '', { context: 3 }).hunks;
 }
 
+/**
+ * Symlinks are versioned as their target PATH (mode 120000). Reading one for
+ * hunks followed the link and compared the target's content with the link
+ * blob, and staging a "hunk" replaced the link with that content (BACKLOG
+ * B-20). Checked before any content is read: on disk and in the index.
+ */
+async function isSymlinkEntry(dir, rel, abs) {
+  try {
+    if (fs.lstatSync(abs).isSymbolicLink()) return true;
+  } catch { /* not on disk */ }
+  return (await indexEntry(dir, rel))?.mode === 0o120000;
+}
+const symlinkNoHunks = () => new AppError('Symbolic links have no hunks: stage or discard the whole entry', 400);
+
 export async function fileHunks(filepath, target = 'unstaged') {
   const dir = repoState.requireRepo();
   const rel = repoState.relPath(filepath);
-  const abs = repoState.safePath(filepath);
+  if (await isSymlinkEntry(dir, rel, repoState.safePath(filepath))) {
+    return { filepath: rel, target, hunks: [], symlink: true };
+  }
+  const abs = repoState.safePath(filepath, { follow: true });
   const { oldText, newText } = await hunkTexts(dir, rel, abs, target);
   const hunks = computeHunks(oldText, newText, rel);
   return {
@@ -1239,35 +1314,60 @@ export async function fileHunks(filepath, target = 'unstaged') {
   };
 }
 
+/** Whether HEAD has a file at `rel` (false for new files and empty repos). */
+async function inHead(dir, rel) {
+  try {
+    const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+    await git.readBlob({ fs, dir, oid: headOid, filepath: rel });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function writeIndex(dir, rel, abs, text) {
   if (text === '' && !fs.existsSync(abs)) {
     await git.remove({ fs, dir, filepath: rel });
     return;
   }
   const oid = await git.writeBlob({ fs, dir, blob: new TextEncoder().encode(text) });
-  await git.updateIndex({ fs, dir, filepath: rel, oid, add: true });
+  // Keep the mode, as `git apply --cached` does: the index entry's if the file
+  // is tracked, the working file's executable bit if it is new. Without it
+  // updateIndex defaults to 100644 and scripts lost +x (BACKLOG B-11).
+  const entry = await indexEntry(dir, rel);
+  const executable = () => { try { return (fs.statSync(abs).mode & 0o111) !== 0; } catch { return false; } };
+  const mode = entry?.mode ?? (executable() ? 0o100755 : 0o100644);
+  await git.updateIndex({ fs, dir, filepath: rel, oid, add: true, mode });
 }
 
 /** op: stage (index += hunks), unstage (index -= hunks), discard (workdir -= hunks). */
 export async function applyHunkOp(filepath, indexes, op) {
   const dir = repoState.requireRepo();
   const rel = repoState.relPath(filepath);
-  const abs = repoState.safePath(filepath);
+  if (await isSymlinkEntry(dir, rel, repoState.safePath(filepath))) throw symlinkNoHunks();
+  const abs = repoState.safePath(filepath, { follow: true });
   const selected = (indexes || []).map(Number);
   if (selected.length === 0) throw new AppError('No hunks selected', 400);
 
   if (op === 'stage') {
     const { oldText, newText } = await hunkTexts(dir, rel, abs, 'unstaged');
     const hunks = computeHunks(oldText, newText, rel);
-    await writeIndex(dir, rel, abs, applyHunks(oldText, hunks, selected));
+    await writeIndex(dir, rel, abs, applyHunks(oldText, hunks, selected, newText));
   } else if (op === 'unstage') {
     const { oldText, newText } = await hunkTexts(dir, rel, abs, 'staged');
     const reversed = computeHunks(oldText, newText, rel).map(reverseHunk);
-    await writeIndex(dir, rel, abs, applyHunks(newText, reversed, selected));
+    const text = applyHunks(newText, reversed, selected, oldText);
+    if (text === '' && !(await inHead(dir, rel))) {
+      // Every hunk of a NEW file unstaged: drop the entry, like `git restore --staged`,
+      // instead of leaving an empty blob staged (BACKLOG B-05).
+      await git.resetIndex({ fs, dir, filepath: rel });
+    } else {
+      await writeIndex(dir, rel, abs, text);
+    }
   } else if (op === 'discard') {
     const { oldText, newText } = await hunkTexts(dir, rel, abs, 'unstaged');
     const reversed = computeHunks(oldText, newText, rel).map(reverseHunk);
-    await fsp.writeFile(abs, applyHunks(newText, reversed, selected), 'utf8');
+    await fsp.writeFile(abs, applyHunks(newText, reversed, selected, oldText), 'utf8');
   } else {
     throw new AppError(`Unknown hunk operation: ${op}`, 400);
   }
@@ -1284,7 +1384,7 @@ export async function stash(op, message) {
 /* ----------------------------------------------------------- tree/files --- */
 
 export async function tree(dirPath = '.') {
-  const abs = repoState.safePath(dirPath);
+  const abs = repoState.safePath(dirPath, { follow: true });
   const entries = await fsp.readdir(abs, { withFileTypes: true });
   return entries
     .filter((e) => !IGNORED_DIRS.has(e.name))
@@ -1316,7 +1416,7 @@ export async function flatFileList(limit = 5000) {
 }
 
 export async function readFile(filepath) {
-  const abs = repoState.safePath(filepath);
+  const abs = repoState.safePath(filepath, { follow: true });
   const stat = await fsp.stat(abs);
   if (stat.size > 2 * 1024 * 1024) throw new AppError('File too large to display', 413);
   const buf = await fsp.readFile(abs);
@@ -1325,7 +1425,7 @@ export async function readFile(filepath) {
 }
 
 export async function writeFile(filepath, content) {
-  const abs = repoState.safePath(filepath);
+  const abs = repoState.safePath(filepath, { follow: true });
   await fsp.mkdir(path.dirname(abs), { recursive: true });
   await fsp.writeFile(abs, content, 'utf8');
 }

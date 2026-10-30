@@ -48,7 +48,8 @@ test('self-hosted GitLab configured over http gets its token, nothing else', () 
 test('no tokens stored → nothing to send; ssh urls → nothing', () => {
   assert.equal(credentialsFor('https://github.com/u/r.git', {}), null);
   assert.equal(credentialsFor('git@github.com:u/r.git', tokens), null);
-  assert.deepEqual(authFor('https://evil.com/x.git', tokens)(), { cancel: true });
+  assert.deepEqual(authFor(tokens)('https://evil.com/x.git'), { cancel: true });
+  assert.deepEqual(authFor(tokens)('https://github.com/u/r.git'), gh, 'decided by the URL passed to onAuth');
 });
 
 test('a git server answering 401 never receives a token (the attack from B-01)', async () => {
@@ -62,7 +63,7 @@ test('a git server answering 401 never receives a token (the attack from B-01)',
   const url = `http://127.0.0.1:${server.address().port}/victim.git`;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gitnd-b01-'));
   try {
-    await assert.rejects(git.clone({ fs, http: gitHttp, dir, url, onAuth: authFor(url, tokens) }));
+    await assert.rejects(git.clone({ fs, http: gitHttp, dir, url, onAuth: authFor(tokens) }));
     assert.ok(seen.length >= 1, 'the server was contacted');
     assert.deepEqual(seen.filter(Boolean), [], 'no Authorization header was sent');
   } finally {

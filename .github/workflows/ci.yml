@@ -1,0 +1,40 @@
+# Unit + service + HTTP tests (test/, node:test) on every push to main.
+# Linux only on purpose: the suite also runs locally on macOS, which covers the
+# case-insensitive filesystem cases (e.g. `.GIT`). Browser E2E are not here:
+# they run on demand (`npm run e2e`, or the E2E workflow's manual button).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The tests build their scenarios with the git CLI (the app itself never
+      # needs it); give it an identity for commands that do not pass -c.
+      - run: |
+          git config --global user.name "git-nd CI"
+          git config --global user.email "ci@git-nd.invalid"
+          git config --global init.defaultBranch main
+
+      - run: pnpm test

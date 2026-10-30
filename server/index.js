@@ -41,6 +41,28 @@ app.use((req, res, next) => {
   if (!isAllowedOrigin(req.headers.origin)) {
     return res.status(403).json({ error: 'Forbidden: cross-origin requests are not allowed' });
   }
+  // Cross-site <img>/<script> GETs carry no Origin, so the check above lets
+  // them through (BACKLOG B-12). Browsers that send Sec-Fetch-Site say so
+  // explicitly; another localhost port counts as "same-site", also refused.
+  const site = req.headers['sec-fetch-site'];
+  if (site && site !== 'same-origin' && site !== 'none') {
+    return res.status(403).json({ error: 'Forbidden: cross-site requests are not allowed' });
+  }
+  // Defense in depth for browsers without Sec-Fetch-*: the API requires a
+  // custom header, which another origin cannot send without a CORS preflight
+  // this server never grants. The UI always sends it; scripts must add it.
+  // (Page loads and the OAuth /auth/* redirects are navigations: not under /api.)
+  // Compare the path the way Express ROUTES it: case-insensitive and decoded.
+  // A plain startsWith('/api/') let `/API/...` reach the API with no header.
+  let routedPath;
+  try {
+    routedPath = decodeURIComponent(req.path).toLowerCase();
+  } catch {
+    return res.status(400).json({ error: 'Bad request path' });
+  }
+  if (routedPath.startsWith('/api') && req.headers['x-gitnd'] !== '1') {
+    return res.status(403).json({ error: 'Forbidden: missing X-GitND: 1 header (required for API calls)' });
+  }
   next();
 });
 

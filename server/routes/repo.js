@@ -93,8 +93,12 @@ repoRouter.get('/api/repo/history', h((req) => gitSvc.history(req.query)));
 repoRouter.get('/api/repo/graph', h((req) => gitSvc.graphPage(req.query)));
 repoRouter.get('/api/repo/graph/tags', h(() => gitSvc.graphTags()));
 
-repoRouter.get('/api/repo/sync', h((req) =>
-  gitSvc.syncStatus({ tokens: tokenStore.tokens(), doFetch: req.query.fetch === '1' })));
+// GETs are read-only (BACKLOG B-12): a fetch reaches the network with the
+// user's tokens, so it is a POST.
+repoRouter.get('/api/repo/sync', h(() =>
+  gitSvc.syncStatus({ tokens: tokenStore.tokens(), doFetch: false })));
+repoRouter.post('/api/repo/sync/fetch', h(() =>
+  gitSvc.syncStatus({ tokens: tokenStore.tokens(), doFetch: true })));
 repoRouter.get('/api/repo/author', h(() => gitSvc.getAuthor()));
 repoRouter.post('/api/repo/author', h((req) => gitSvc.setAuthor(req.body)));
 

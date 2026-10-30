@@ -38,6 +38,11 @@ class RepoState {
    * dropped on repo switch or after GIT_CACHE_IDLE_MS idle.
    */
   gitCache() {
+    // isomorphic-git caches "no index" for a repo whose .git/index does not
+    // exist yet (fresh `git init`) and never notices when it appears, so the
+    // first commit saw nothing staged. Until the index exists, hand out a
+    // throwaway cache — there are no packfiles to reuse yet anyway.
+    if (!fs.existsSync(path.join(this.requireRepo(), '.git', 'index'))) return {};
     clearTimeout(this._gitCacheTimer);
     this._gitCache ||= {};
     this._gitCacheTimer = setTimeout(() => this.dropGitCache(), GIT_CACHE_IDLE_MS);
@@ -57,11 +62,48 @@ class RepoState {
   }
 
   /** Resolve a repo-relative filepath and ensure it stays inside the repo. */
-  safePath(filepath) {
+  /**
+   * Absolute path for a repo-relative `filepath`, refusing anything that ends
+   * up outside the repo or inside .git/ (BACKLOG B-09, B-13):
+   * - lexically (`../`), as before;
+   * - through a symlinked directory on the way (`link/secret.txt`, where
+   *   `link -> ~/.ssh` came with a cloned repo): the parent's real path must
+   *   be inside the repo;
+   * - with `follow: true` (operations that read or write the CONTENT), the
+   *   final component too: a link to a file or directory outside, or a
+   *   dangling link (writing would create its target), is refused.
+   * Without `follow`, a symlink entry itself stays usable (stage, discard):
+   * git versions the link, not what it points to.
+   */
+  safePath(filepath, { follow = false } = {}) {
     const dir = this.requireRepo();
+    const outside = () => new AppError('Path outside the open repository', 403);
     const abs = path.resolve(dir, filepath || '.');
-    if (abs !== dir && !abs.startsWith(dir + path.sep)) {
-      throw new AppError('Path outside the open repository', 403);
+    if (abs === dir) return abs;
+    if (!abs.startsWith(dir + path.sep)) throw outside();
+    // .git holds config (remote URLs → where tokens go), hooks and the index —
+    // the repo's and any nested repo's. No path component may be ".git" (git
+    // itself forbids it), compared case-insensitively (.GIT on macOS).
+    const gitDirInside = (rel) => rel.split(path.sep).some((seg) => seg.toLowerCase() === '.git');
+    const noGit = () => new AppError('Access to .git/ is not allowed', 403);
+    if (gitDirInside(path.relative(dir, abs))) throw noGit();
+
+    const root = fs.realpathSync(dir);
+    const inside = (p) => p === root || p.startsWith(root + path.sep);
+    const real = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
+    const exists = (p) => { try { fs.lstatSync(p); return true; } catch { return false; } };
+
+    let probe = path.dirname(abs); // deepest existing ancestor of the parent
+    while (!exists(probe)) probe = path.dirname(probe);
+    const parentReal = real(probe);
+    if (!parentReal || !inside(parentReal)) throw outside();
+    // The same rule on the REAL path: `gdir -> .git` makes "gdir/config" .git/config.
+    if (gitDirInside(path.relative(root, parentReal))) throw noGit();
+
+    if (follow && exists(abs) && fs.lstatSync(abs).isSymbolicLink()) {
+      const target = real(abs);
+      if (!target || !inside(target)) throw outside();
+      if (gitDirInside(path.relative(root, target))) throw noGit(); // `cfg -> .git/config`
     }
     return abs;
   }
