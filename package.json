@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "e2e": "playwright test"
   },
   "dependencies": {
     "chokidar": "^5.0.0",
@@ -20,7 +21,7 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "node-git-server": "^1.0.0",
-    "playwright-core": "^1.61.1"
+    "@playwright/test": "1.61.1",
+    "node-git-server": "^1.0.0"
   }
 }

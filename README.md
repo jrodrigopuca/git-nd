@@ -12,7 +12,16 @@ pnpm start
 # → http://localhost:3847
 ```
 
-For development with auto-reload: `pnpm dev`.
+For development with auto-reload: `pnpm dev`. Requires Node ≥ 24.
+
+## Tests
+
+| Command | What | When |
+| --- | --- | --- |
+| `pnpm test` | Unit, service and HTTP tests (`test/`, `node:test`) | CI on every push to `main` (`.github/workflows/ci.yml`) |
+| `pnpm e2e` | Browser E2E with Playwright (`e2e/`) on the installed Google Chrome | On demand, locally or with the **E2E** workflow's "Run workflow" button |
+
+Both build their repositories with the `git` CLI (the app itself never needs it) in temporary folders, with a temporary `HOME`: they never touch your repos, settings or tokens. Known bugs and their tests are tracked in [BACKLOG.md](BACKLOG.md).
 
 ## Features
 
@@ -86,6 +95,8 @@ pnpm start
 Tokens are **never** kept in the browser. They are stored server-side, encrypted with **AES-256-GCM**, in `~/.git-nd/tokens.enc`, so they survive server restarts. The encryption key lives in `~/.git-nd/secret.key` (file mode `0600`), or can be supplied via the `GITND_KEY` env var (32 bytes, hex). This protects tokens at rest (backups, sync tools); anyone who can read both files as your OS user can still decrypt — that is the ceiling for any local app that does not use an OS keychain.
 
 ## REST API
+
+Every `/api/*` request must send the header `X-GitND: 1` (CSRF protection — the UI always sends it), e.g. `curl -H 'X-GitND: 1' localhost:3847/api/repo/status`.
 
 | Method | Endpoint | Description |
 | --- | --- | --- |

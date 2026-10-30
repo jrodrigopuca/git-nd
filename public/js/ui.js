@@ -31,7 +31,10 @@ export function openModal(...content) {
   modal.replaceChildren(...content.filter((c) => c != null && c !== false));
   backdrop().hidden = false;
   const first = modal.querySelector('input, textarea, select');
-  if (first) setTimeout(() => first.focus(), 30);
+  // Deferred autofocus, but never steal focus from a field the user already
+  // moved to: within those 30 ms, typing into the 2nd field landed in the 1st
+  // (found by the clone E2E: the target path ended up in the URL field).
+  if (first) setTimeout(() => { if (!modal.contains(document.activeElement)) first.focus(); }, 30);
 }
 
 export function closeModal() {

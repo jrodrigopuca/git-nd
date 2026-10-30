@@ -63,7 +63,7 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ### B-04 `[x]` 🔴 Al cambiar de repo, Diff y Conflict quedan vivos y actúan sobre el repo nuevo
 
-- **Re-cerrado (tanda 2b):** la UI escucha `repo-opened`, y `refreshAll` cierra las vistas cuando `info.dir` cambia desde afuera. Si había cambios sin guardar en File, avisa que se descartaron. Un flag (`switchingRepo`) evita ese aviso cuando el cambio lo hizo la propia pestaña. E2E de QA con dos clientes (`b04-twoclients-ui.mjs`): con el código anterior B perdía su cambio, ahora pasa todo. **Pendiente:** es solo de navegador, así que no tiene test en `test/`; queda para cuando se pasen los E2E a Playwright.
+- **Re-cerrado (tanda 2b):** la UI escucha `repo-opened`, y `refreshAll` cierra las vistas cuando `info.dir` cambia desde afuera. Si había cambios sin guardar en File, avisa que se descartaron. Un flag (`switchingRepo`) evita ese aviso cuando el cambio lo hizo la propia pestaña. E2E de QA con dos clientes (`b04-twoclients-ui.mjs`): con el código anterior B perdía su cambio, ahora pasa todo. **E2E en el repo:** `e2e/repo-switch.spec.js` (cambio desde esta pestaña y desde otro cliente).
 
 - **Reabierto (verificación QA):** si el cambio de repo lo hace **otro cliente** (otra pestaña, `curl`, un script), la pestaña 1 refresca y muestra B, pero el Diff de A sigue abierto, y "Discard" borró el cambio de B. Reproducido en el navegador (`b04-twoclients-ui.mjs`). Causa: la UI no escucha `repo-opened` y `refreshAll` no cierra las vistas cuando cambia `info.dir`.
 
@@ -259,7 +259,7 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Criterios de aceptación:**
   - [x] Si sync o stash fallan, sus paneles se vacían; nunca quedan con datos de otro repo.
   - [x] Test E2E que fuerza la falla de un endpoint (por ejemplo con `page.route`).
-- **Cerrado:** `refreshSync` y `refreshStash` vacían sus paneles cuando el pedido falla. E2E de QA (`b08-ui.mjs`, que hace fallar el endpoint corrompiendo el repo, no con `page.route`): con el código anterior fallaba, ahora pasa. **Pendiente:** pasarlo a Playwright dentro del repo.
+- **Cerrado:** `refreshSync` y `refreshStash` vacían sus paneles cuando el pedido falla. E2E de QA (`b08-ui.mjs`, que hace fallar el endpoint corrompiendo el repo, no con `page.route`): con el código anterior fallaba, ahora pasa. **E2E en el repo:** `e2e/panels.spec.js`, que ahora fuerza la falla con `page.route` (sin corromper ningún repo).
 
 ---
 
@@ -280,7 +280,7 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Criterios de aceptación:**
   - [x] Clicks rápidos sobre una carpeta dejan siempre un estado coherente, sin hijos duplicados.
   - [x] Borrar una carpeta expandida no deja errores sin manejar.
-- **Cerrado:** cada nodo lleva una secuencia, y una carga de hijos que vuelve después de un click más nuevo se descarta. El re-expandido después de un refresco usa el mismo camino: si la carpeta ya no existe, la colapsa en vez de dejar una promesa sin manejar. E2E (scratchpad `e2e/batch3-ui.mjs`, que demora la respuesta por CDP): con el código anterior quedaba `▶` con hijos y después dos juegos de hijos; ahora pasa. **Pendiente:** es solo de navegador; queda para Playwright. El caso "carpeta borrada" está verificado solo leyendo el código.
+- **Cerrado:** cada nodo lleva una secuencia, y una carga de hijos que vuelve después de un click más nuevo se descarta. El re-expandido después de un refresco usa el mismo camino: si la carpeta ya no existe, la colapsa en vez de dejar una promesa sin manejar. E2E (scratchpad `e2e/batch3-ui.mjs`, que demora la respuesta por CDP): con el código anterior quedaba `▶` con hijos y después dos juegos de hijos; ahora pasa. **E2E en el repo:** `e2e/races.spec.js` (retiene la carga de la carpeta con `page.route`). El caso "carpeta borrada" sigue verificado solo leyendo el código.
 
 ### B-16 `[x]` 🟡 El WebSocket de otro origen completa el handshake antes de cerrarse
 
@@ -303,11 +303,25 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Descripción:** solo el grafo tiene guard de época. Un refresco del watcher que salió antes de un commit pero llega después pinta la lista de cambios y las ramas viejas hasta el próximo refresco.
 - **Criterios de aceptación:**
   - [x] Una respuesta de `refreshAll` más vieja que la última aplicada se descarta en todos los paneles.
-- **Cerrado:** cada `refreshAll` lleva un número, y la respuesta de uno que fue superado por un refresco más nuevo se descarta entera, incluidos tree, stash y sync. `refreshTree` tiene su propia secuencia, porque también se llama desde otros lugares. E2E (`e2e/batch3-ui.mjs`, que retiene por CDP la respuesta de `status` de un refresco viejo): con el código anterior quedaba `a.txt` como unstaged después del stage; ahora pasa. **Pendiente:** queda para Playwright.
+- **Cerrado:** cada `refreshAll` lleva un número, y la respuesta de uno que fue superado por un refresco más nuevo se descarta entera, incluidos tree, stash y sync. `refreshTree` tiene su propia secuencia, porque también se llama desde otros lugares. E2E (`e2e/batch3-ui.mjs`, que retiene por CDP la respuesta de `status` de un refresco viejo): con el código anterior quedaba `a.txt` como unstaged después del stage; ahora pasa. **E2E en el repo:** `e2e/races.spec.js` (retiene la respuesta de `status` con `page.route`).
+
+---
+
+## Encontrados al pasar los E2E a Playwright
+
+### B-22 `[x]` 🟡 El autofocus diferido de los modales roba el foco del campo donde ya se está escribiendo
+
+- **Dónde:** `public/js/ui.js` → `openModal`
+- **Descripción:** `openModal` le daba el foco al primer campo 30 ms después de abrir. Si en ese lapso el usuario (o un test) ya había pasado al segundo campo, el foco volvía al primero en pleno tipeo, y el texto caía en el campo equivocado. En el modal de clonado, la ruta destino terminaba en el campo URL. Afecta a todos los modales.
+- **Verificado:** `e2e/clone.spec.js` repetido 12 veces: fallaba 3 de 12, con la ruta en el campo URL. Con el arreglo, 24 de 24.
+- **Cerrado:** el autofocus solo actúa si el foco todavía no entró al modal.
+- **Probable efecto colateral (inferido, sin demostrar):** desde este arreglo desapareció un cuelgue intermitente al cerrar el worker de Playwright (17 corridas completas seguidas sin cuelgue; antes, alrededor de 1 de cada 3). La hipótesis: el clon contra una URL deformada dejaba un pedido abierto en el `node-git-server` del test.
 
 ---
 
 ## Para evaluar (comportamientos raros, no bugs)
+
+- **Accesibilidad:** los botones de cada fila de Changes (Stage, Unstage, Discard) tienen `display: none` hasta que pasa el mouse por encima, así que **no se pueden alcanzar con el teclado**. Lo destapó el E2E, que tiene que hacer hover antes del click.
 
 - Amend y cherry-pick resetean la fecha del autor. Git la conserva.
 - Rebase y cherry-pick ignoran el modo del archivo y los symlinks: un symlink re-aplicado queda como archivo común.
