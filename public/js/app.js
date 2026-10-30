@@ -1340,6 +1340,24 @@ $('btn-clone').addEventListener('click', () => cloneModal());
 $('repo-name').addEventListener('click', () => switchView('explorer'));
 $('btn-refresh-tree').addEventListener('click', refreshAll);
 
+/* Files sidebar collapse (visual review 2, F1). Persisted like the theme;
+   storage can throw (private mode, blocked site data) — then it just doesn't persist. */
+function setFilesCollapsed(collapsed, { persist = true } = {}) {
+  $('layout').classList.toggle('files-collapsed', collapsed);
+  $('tree').hidden = collapsed;
+  $('btn-refresh-tree').hidden = collapsed;
+  const toggle = $('btn-files-toggle');
+  const label = collapsed ? 'Show files' : 'Hide files';
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.setAttribute('aria-label', label);
+  toggle.title = label;
+  if (persist) try { localStorage.setItem('gitnd-files-collapsed', collapsed ? '1' : '0'); } catch { /* not persisted */ }
+}
+const filesCollapsed = () => $('layout').classList.contains('files-collapsed');
+$('btn-files-toggle').addEventListener('click', () => setFilesCollapsed(!filesCollapsed()));
+$('files-rail-label').addEventListener('click', () => setFilesCollapsed(false));
+try { if (localStorage.getItem('gitnd-files-collapsed') === '1') setFilesCollapsed(true, { persist: false }); } catch { /* starts expanded */ }
+
 /* ========================================================== PR / issues === */
 
 function originRepoSlug() {

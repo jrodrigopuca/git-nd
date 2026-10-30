@@ -102,12 +102,14 @@ export async function refreshTree() {
 
 /* ---- drag & drop: drop OS files into the repo ---- */
 export function initTreeDnD() {
-  const tree = container();
-  tree.addEventListener('dragover', (e) => { e.preventDefault(); tree.classList.add('dragover'); });
-  tree.addEventListener('dragleave', () => tree.classList.remove('dragover'));
-  tree.addEventListener('drop', async (e) => {
+  // The whole sidebar is the drop zone, so the collapsed rail (no tree
+  // visible) still accepts a file: it lands at the repo root.
+  const zone = document.getElementById('sidebar');
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('dragover'); });
+  zone.addEventListener('drop', async (e) => {
     e.preventDefault();
-    tree.classList.remove('dragover');
+    zone.classList.remove('dragover');
     const targetNode = e.target.closest('.tree-node');
     let baseDir = '';
     if (targetNode) {

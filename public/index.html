@@ -65,9 +65,16 @@
       <div class="layout" id="layout">
         <aside class="sidebar" id="sidebar">
           <div class="panel-title">
-            Files
-            <button class="btn btn-ghost btn-xs" id="btn-refresh-tree" title="Refresh" aria-label="Refresh files">↻</button>
+            <span class="files-title">Files</span>
+            <span class="panel-title-actions">
+              <button class="btn btn-ghost btn-xs" id="btn-refresh-tree" title="Refresh" aria-label="Refresh files">↻</button>
+              <button class="btn btn-ghost btn-xs btn-icon" id="btn-files-toggle" aria-controls="sidebar" aria-expanded="true" aria-label="Hide files" title="Hide files">
+                <svg class="icon i-collapse" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></g></svg>
+                <svg class="icon i-expand" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></g></svg>
+              </button>
+            </span>
           </div>
+          <div class="files-rail-label" id="files-rail-label" aria-hidden="true">Files</div>
           <div class="tree" id="tree" tabindex="0">
             <p class="muted pad">No repository open. Pick one in the 🗂️ Explorer view.</p>
           </div>

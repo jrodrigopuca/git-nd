@@ -465,6 +465,33 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - Test: `e2e/narrow.spec.js`, 4 tests, que incluye stage y commit desde el panel. Con el código anterior fallan 3; el cuarto es una regresión en ventana ancha.
   - Verificación visual con capturas a 960 px en los dos temas, con el panel abierto y cerrado.
 
+## Revisión visual 2 (UX/UI, 2026-10-30)
+
+Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Orden acordado: R2-0 → R2-1 → íconos (R2-3, con R2-5) → R2-4 → Connections → Explorer.
+
+### R2-0 `[x]` 🟠 El campo del token de Connections no tenía estilo
+- **Dónde:** `style.css` estilizaba solo `input[type="text"]`. El PAT es `type="password"` y en el tema oscuro quedaba una caja blanca del navegador, sin el borde `--border-strong` de V-A.
+- **Cerrado:** la regla cubre `text`, `password`, `search` y `url`. Test: `test/contrast.test.js` recorre los tipos de input que crea la UI y falla si alguno no tiene estilo. Con el CSS anterior, falla.
+
+### R2-1 `[x]` 🟠 El sidebar Files no se podía colapsar
+- **Descripción:** a 1180 px el grafo tenía unos 555 px y cortaba los mensajes, mientras Files ocupaba 260 px.
+- **Cerrado:**
+  - `#btn-files-toggle` lleva `aria-expanded` y `aria-controls`. Es el mismo elemento expandido y colapsado, así que el foco no se pierde.
+  - Colapsado, queda un rail de 40 px con "FILES" en vertical, clickeable. `#tree` y `#btn-refresh-tree` quedan con `hidden` y salen del orden de Tab.
+  - El estado se guarda en `localStorage['gitnd-files-collapsed']`, con try/catch.
+  - Sin animación de ancho.
+  - Es independiente del drawer de menos de 980 px.
+  - La zona de drop pasa a ser todo el sidebar: soltar un archivo sobre el rail lo agrega en la raíz.
+  - Sin atajo Ctrl/Cmd+B por ahora: pisa los marcadores de Firefox.
+  - Test: `e2e/files-collapse.spec.js`, 5 tests. Con el código anterior fallan los 5.
+
+### R2-3 `[ ]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
+### R2-4 `[ ]` 🟠 `tree.js` detecta carpetas leyendo el texto del twisty
+- Con un twisty SVG, todo drop iría a la carpeta padre. Hay que arreglarlo, con un test de DnD sobre una carpeta, antes de cambiar el twisty.
+### R2-5 `[ ]` 🟡 Marca: una sola hoja (en iteración a partir de la referencia del usuario, teal)
+### R2-6 `[ ]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
+### R2-7 `[ ]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"
+
 ### B-25 `[?]` 🟡 "Initial commit" aparece dos veces en el historial
 
 - **Origen:** captura del agente de UX/UI. Todavía no está reproducido.

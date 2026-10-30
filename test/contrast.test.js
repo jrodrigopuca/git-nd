@@ -116,6 +116,16 @@ test('no text sits on a light FILL token (the other half: white text on --accent
   assert.deepEqual(offenders, []);
 });
 
+test('every text-entry input type the UI creates gets the themed input style (the PAT field was a white browser box in dark)', () => {
+  const sources = ['index.html', 'js/app.js', 'js/ui.js', 'js/tree.js', 'js/graph.js', 'js/conflict.js']
+    .map((f) => fs.readFileSync(new URL(`../public/${f}`, import.meta.url), 'utf8')).join('\n');
+  const textEntry = new Set(['text', 'password', 'email', 'url', 'search', 'tel', 'number']);
+  const used = new Set([...sources.matchAll(/type[=:]\s*['"]([a-z]+)['"]/g)].map((m) => m[1]).filter((t) => textEntry.has(t)));
+  assert.ok(used.has('password'), 'the scan sees the PAT field (sanity: the regex still matches el() options)');
+  const rule = css.match(/(^|\n)\s*(input\[type="text"\][^{]*)\{[^}]*border:\s*1px solid var\(--border-strong\)/)?.[2] ?? '';
+  for (const t of used) assert.ok(rule.includes(`input[type="${t}"]`), `input[type="${t}"] is used but not styled (selector: ${rule.trim()})`);
+});
+
 test('selectors use the text-safe tokens (not the fill colors)', () => {
   const rule = (sel) => css.match(new RegExp(`(^|\\n)\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[2] ?? '';
   assert.match(rule('.btn-primary'), /background:\s*var\(--accent-solid\)/);
@@ -126,6 +136,6 @@ test('selectors use the text-safe tokens (not the fill colors)', () => {
   assert.match(rule('.st-deleted'), /var\(--red-text\)/);
   assert.match(rule('.cf-pane-head.ours'), /color:\s*var\(--ours-text\)/);
   assert.match(rule('.cf-pane-head.theirs'), /color:\s*var\(--theirs-text\)/);
-  assert.match(css, /input\[type="text"\], textarea, select\s*\{[^}]*border:\s*1px solid var\(--border-strong\)/);
+  assert.match(css, /input\[type="text"\],[^{]*textarea, select\s*\{[^}]*border:\s*1px solid var\(--border-strong\)/);
   assert.match(css, /(^|\n)a\s*\{[^}]*color:\s*var\(--link\)/, 'links use --link');
 });
