@@ -486,8 +486,10 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
   - Test: `e2e/files-collapse.spec.js`, 5 tests. Con el código anterior fallan los 5.
 
 ### R2-3 `[ ]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
-### R2-4 `[ ]` 🟠 `tree.js` detecta carpetas leyendo el texto del twisty
-- Con un twisty SVG, todo drop iría a la carpeta padre. Hay que arreglarlo, con un test de DnD sobre una carpeta, antes de cambiar el twisty.
+### R2-4 `[x]` 🟠 `tree.js` detecta carpetas leyendo el texto del twisty
+- Con un twisty SVG, todo drop iría a la carpeta padre.
+- **Cerrado:** el `.tree-node` lleva `data-type` y el drop decide con ese dato.
+- **Test:** 3 E2E de drop en `e2e/files-collapse.spec.js`: sobre una carpeta, sobre un archivo dentro de una carpeta, y con el twisty vacío. Con el código anterior falla el tercero.
 ### R2-5 `[ ]` 🟡 Marca: una sola hoja (en iteración a partir de la referencia del usuario, teal)
 ### R2-6 `[ ]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
 ### R2-7 `[ ]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"

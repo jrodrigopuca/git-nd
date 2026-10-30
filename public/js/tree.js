@@ -30,7 +30,7 @@ async function renderLevel(path) {
 }
 
 function renderNode(entry) {
-  const node = el('div', { class: 'tree-node', dataset: { path: entry.path } });
+  const node = el('div', { class: 'tree-node', dataset: { path: entry.path, type: entry.type } });
   const st = statusMap.get(entry.path);
   const row = el('div', { class: 'tree-row' },
     el('span', { class: 'twisty' }, entry.type === 'dir' ? (expanded.has(entry.path) ? '▼' : '▶') : ''),
@@ -114,8 +114,8 @@ export function initTreeDnD() {
     let baseDir = '';
     if (targetNode) {
       const path = targetNode.dataset.path;
-      const twisty = targetNode.querySelector('.twisty')?.textContent;
-      baseDir = twisty ? path : path.split('/').slice(0, -1).join('/');
+      // The node says what it is; the twisty's look (text or SVG) is not data.
+      baseDir = targetNode.dataset.type === 'dir' ? path : path.split('/').slice(0, -1).join('/');
     }
     for (const file of e.dataTransfer.files) {
       const content = await file.text();

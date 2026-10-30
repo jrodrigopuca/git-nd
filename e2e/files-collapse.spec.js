@@ -75,6 +75,34 @@ test.describe('Files sidebar collapse (1180px)', () => {
   });
 });
 
+test.describe('dropping files on the tree (R2-4)', () => {
+  // The drop used to tell folders from files by the twisty's TEXT (▶/▼):
+  // with an SVG twisty that text is empty and every drop would go to the
+  // parent. These guard the folder detection whatever the twisty looks like.
+  test('on a folder row: the file lands inside that folder', async ({ app, repos, page }) => {
+    const R = repos.make('R', { 'src/a.txt': 'a\n' });
+    await app.boot(R);
+    await dropFile(page, '#tree .tree-node[data-path="src"] > .tree-row', 'in-folder.txt', 'x\n');
+    await expect.poll(() => { try { return read(R, 'src/in-folder.txt'); } catch { return null; } }).toBe('x\n');
+  });
+
+  test('on a file inside a folder: the file lands next to it', async ({ app, repos, page }) => {
+    const R = repos.make('R', { 'src/a.txt': 'a\n' });
+    await app.boot(R);
+    await page.locator('#tree .tree-node[data-path="src"] > .tree-row').click();
+    await dropFile(page, '#tree .tree-node[data-path="src/a.txt"] > .tree-row', 'sibling.txt', 'y\n');
+    await expect.poll(() => { try { return read(R, 'src/sibling.txt'); } catch { return null; } }).toBe('y\n');
+  });
+
+  test('with an empty twisty (as an SVG one would be), a folder is still a folder', async ({ app, repos, page }) => {
+    const R = repos.make('R', { 'src/a.txt': 'a\n' });
+    await app.boot(R);
+    await page.evaluate(() => document.querySelectorAll('#tree .twisty').forEach((t) => { t.textContent = ''; }));
+    await dropFile(page, '#tree .tree-node[data-path="src"] > .tree-row', 'svg-twisty.txt', 'z\n');
+    await expect.poll(() => { try { return read(R, 'src/svg-twisty.txt'); } catch { return null; } }).toBe('z\n');
+  });
+});
+
 test.describe('Files collapse below 980px', () => {
   test.use({ viewport: { width: 900, height: 800 } });
 
