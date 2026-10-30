@@ -28,6 +28,8 @@ function showTab(name) {
     if (['file', 'diff', 'conflict'].includes(t.dataset.tab) && t.dataset.tab === name) t.hidden = false;
   });
   document.querySelectorAll('.tab-content').forEach((c) => c.classList.toggle('active', c.id === `tab-${name}`));
+  // On the merge view itself the banner is just status: no button to the place you are.
+  document.getElementById('btn-merge-view').hidden = name === 'merge';
 }
 document.querySelectorAll('.tab').forEach((t) =>
   t.addEventListener('click', () => showTab(t.dataset.tab)));
@@ -450,7 +452,7 @@ function renderHistory(commits) {
       el('div', { class: 'cmeta' },
         el('span', { class: 'chash' }, c.oid.slice(0, 7)),
         el('span', {}, c.author),
-        el('span', {}, new Date(c.date).toLocaleString()),
+        el('span', { title: new Date(c.date).toLocaleString() }, new Date(c.date).toLocaleDateString()),
       ),
     )));
 }
@@ -573,6 +575,20 @@ async function commitActions(c) {
       ))),
     el('div', { class: 'modal-actions', style: 'flex-wrap:wrap' },
       el('button', {
+        // Destructive but secondary: outlined, FIRST in the row (DOM order =
+        // visual order = Tab order) and pushed away from the other actions and
+        // Close (visual review, proposal C).
+        class: 'btn btn-danger-ghost push-start', title: 'Destructive: moves the branch here and drops later commits',
+        onclick: async () => {
+          closeModal();
+          if (await confirmModal('Hard reset to this commit',
+            `The current branch will point to ${c.oid.slice(0, 7)} and the working directory will be restored (hard reset). Later commits are dropped from the branch. Are you sure?`)) {
+            const r = await withUi(api.post('/api/repo/reset', { oid: c.oid }), { loading: 'Resetting…', success: 'Branch reset' });
+            if (r) refreshAll();
+          }
+        },
+      }, '⏪ Hard reset…'),
+      el('button', {
         class: 'btn', title: 'Create a new commit that undoes this one — history is preserved',
         onclick: async () => {
           closeModal();
@@ -614,17 +630,6 @@ async function commitActions(c) {
           );
         },
       }, '🏷 Tag'),
-      el('button', {
-        class: 'btn btn-danger', title: 'Destructive: moves the branch here and drops later commits',
-        onclick: async () => {
-          closeModal();
-          if (await confirmModal('Hard reset to this commit',
-            `The current branch will point to ${c.oid.slice(0, 7)} and the working directory will be restored (hard reset). Later commits are dropped from the branch. Are you sure?`)) {
-            const r = await withUi(api.post('/api/repo/reset', { oid: c.oid }), { loading: 'Resetting…', success: 'Branch reset' });
-            if (r) refreshAll();
-          }
-        },
-      }, '⏪ Hard reset'),
       el('button', { class: 'btn', onclick: closeModal }, 'Close'),
     ),
   );
@@ -634,7 +639,7 @@ async function commitActions(c) {
 
 function renderBranches(branches) {
   const li = (name, isCurrent, isRemote) => el('li', {},
-    el('span', { class: `bname ${isCurrent ? 'current' : ''}` }, `${isCurrent ? '✔ ' : ''}⎇ ${name}`),
+    el('span', { class: `bname ${isCurrent ? 'current' : ''}`, title: name }, `${isCurrent ? '✔ ' : ''}⎇ ${name}`), // full name when it is cut with …
     !isCurrent && !isRemote && el('span', { class: 'actions row' },
       el('button', {
         class: 'btn btn-ghost btn-xs', title: 'Switch to this branch',
@@ -791,17 +796,22 @@ async function renderMergeView() {
           el('div', { class: 'cmeta' },
             el('span', { class: 'chash' }, c.oid.slice(0, 7)),
             el('span', {}, c.author),
-            el('span', {}, new Date(c.date).toLocaleString())),
+            el('span', { title: new Date(c.date).toLocaleString() }, new Date(c.date).toLocaleDateString())),
         ))),
     ),
 
+    // One primary action; when it cannot run yet it looks neutral and SAYS why.
+    // Abort is destructive but secondary: outlined, at the far end, "…" because
+    // a confirmation follows (visual review, proposal C).
     el('div', { class: 'mv-actions' },
       el('button', {
         class: 'btn btn-primary', disabled: s.pending > 0,
-        title: s.pending ? 'Resolve all conflicts first' : '',
+        'aria-describedby': s.pending ? 'mv-complete-reason' : null,
         onclick: completeMergeAction,
-      }, `✔ Complete merge (${s.pending ? `${s.pending} pending` : 'ready'})`),
-      el('button', { class: 'btn btn-danger', onclick: abortMergeAction }, '✖ Abort merge'),
+      }, '✔ Complete merge'),
+      s.pending > 0 && el('span', { class: 'mv-reason', id: 'mv-complete-reason' },
+        `Resolve ${s.pending} conflicted file${s.pending === 1 ? '' : 's'} first.`),
+      el('button', { class: 'btn btn-danger-ghost push-end', onclick: abortMergeAction }, '✖ Abort merge…'),
     ),
   );
 }

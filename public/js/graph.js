@@ -389,7 +389,9 @@ export class GraphView {
         drawChip(`+${rest.length}`, rest.map((r) => r.name).join('\n'), { color: 'var(--muted)' });
         break;
       }
-      const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent)' : COLORS[laneIdx % COLORS.length];
+      // The current branch chip is FILLED with white text on it: it needs the
+      // solid accent (4.5:1), not the lighter --accent (2.8:1 in dark).
+      const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent-solid)' : COLORS[laneIdx % COLORS.length];
       drawChip(shown, shown !== raw ? t.name : null, { color, current: t.current, remote: t.remote });
     }
 
@@ -420,7 +422,11 @@ export class GraphView {
     // Author lives in the avatar; keep the meta line lean. Anchored to the
     // right edge so it stays put regardless of message/chip length.
     const meta = svgEl('text', { x: width - 10, y: cy + 4, 'text-anchor': 'end', class: 'graph-meta' });
+    // Same date format as the History list (date only; date + time on hover).
     meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
+    const metaTip = svgEl('title', {});
+    metaTip.textContent = new Date(c.date).toLocaleString();
+    meta.append(metaTip);
     g.append(msg, meta);
     if (this.onSelect) g.addEventListener('click', () => { this.setActiveRow(i); this.onSelect(c); });
     // Keyboard (BACKLOG B-24): one tab stop (roving tabindex), ↑/↓ to move,

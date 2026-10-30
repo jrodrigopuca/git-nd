@@ -373,6 +373,83 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ---
 
+## Revisión visual (UX/UI, 2026-10-30)
+
+Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesión. Hallazgos verificados antes de implementar.
+
+### V-A `[x]` 🟠 Contraste insuficiente (WCAG AA)
+
+- **Descripción:** el texto blanco sobre los botones primarios daba 2,82:1 en oscuro. También fallaban:
+  - las etiquetas LOCAL e INCOMING (2,68:1);
+  - los chips de rama del merge;
+  - el rojo como texto en oscuro (4,37:1);
+  - el amarillo, el verde y los links en claro;
+  - el botón rojo sólido en oscuro (3,41:1);
+  - el chip relleno de la rama actual en el grafo;
+  - los bordes de inputs (1,3–1,5:1, cuando el mínimo es 3:1).
+
+  Varios de estos no estaban en el informe y aparecieron al medir. Dos valores propuestos por el agente no alcanzaban: el azul fallaba en hover (3,77:1) y los bordes no llegaban a 3:1.
+- **Cerrado:**
+  - Tokens solo de texto y de relleno sólido en los dos temas: `--accent-solid`, `--danger-solid`, `--red-text`, `--green-text`, `--yellow-text`, `--ours-text`, `--theirs-text`, `--link` y `--border-strong`.
+  - Los botones sólidos **oscurecen** en hover, así el contraste sube en lugar de bajar.
+  - `test/contrast.test.js` calcula cada par desde `style.css`, en los dos temas y con el hover. Además falla si algún `color:` usa un color de relleno.
+
+### V-C `[x]` 🟠 La acción destructiva era la más visible; varias acciones primarias a la vez
+
+- **Cerrado:**
+  - "Abort merge…" y "Hard reset…" usan `.btn-danger-ghost` (con borde, sin relleno), están separados de la acción principal y llevan "…" porque abren una confirmación. Hard reset va primero en el DOM, para que el orden visual coincida con el de Tab.
+  - Un primario deshabilitado se ve neutro y explica por qué ("Resolve 1 conflicted file first.", con `aria-describedby`).
+  - El banner de merge no es primario, y en la vista de merge es solo una línea de estado.
+  - Test: `e2e/visual-hierarchy.spec.js`.
+
+### V-QW `[x]` 🟡 Mejoras rápidas
+
+- **Cerrado:**
+  - links con `--link` (el "Connections" del Explorer era ilegible en oscuro);
+  - el título del sidebar pasó de "Explorer" a "Files";
+  - los nombres de rama largos se cortan con "…" y muestran el nombre completo en `title`;
+  - la misma fecha en el historial y en el grafo (solo fecha, con fecha y hora en hover);
+  - las etiquetas de los paneles de conflicto pasaron de 10 a 11 px.
+
+### V-B `[ ]` 🟠 Panel de commit (patrón de GitHub Desktop)
+
+- **Propuesta:**
+  - primero el mensaje;
+  - el autor como una línea con "change";
+  - un botón que dice qué hace ("Commit 1 file to main");
+  - deshabilitado con motivo cuando no hay nada staged;
+  - el grupo de staged tintado;
+  - "Stage all" y "Unstage all" escritos en texto.
+
+  Hoy Commit sigue siendo primario y habilitado durante un merge y sin cambios. Esfuerzo M.
+
+### V-D `[ ]` 🟡 Legibilidad del grafo
+
+- **Propuesta:**
+  - sin el espacio vacío entre las lanes y el texto;
+  - ancho según el contenedor (hoy la fecha se corta incluso a 1440 px);
+  - columnas de hash y fecha relativa;
+  - fila seleccionada persistente;
+  - chips con relleno.
+
+  Mantiene las filas de 28 px, la virtualización, el roving tabindex y los tests. Esfuerzo M.
+
+### V-E `[ ]` 🟠 Por debajo de 980 px no se puede commitear
+
+- **Dónde:** `public/css/style.css`, regla `@media (max-width: 980px) { .rightbar { display: none } }`.
+- **Descripción:** Changes, el stage y Commit viven en `.rightbar`, que desaparece por debajo de 980 px. En una laptop chica no se puede commitear. Es un bug funcional, no solo visual.
+- **Propuesta:** un panel desplegable que se abre desde un botón en la barra superior (con el badge de cambios), y el sidebar a 200 px. Esfuerzo M.
+
+### B-25 `[?]` 🟡 "Initial commit" aparece dos veces en el historial
+
+- **Origen:** captura del agente de UX/UI. Todavía no está reproducido.
+
+### B-26 `[?]` 🟠 Commits con la misma fecha de commit se dibujan en orden incorrecto
+
+- **Origen:** en la captura del agente, "Tweak f2" aparece debajo de su padre. Sospecha: commits con el mismo `committer.timestamp` al segundo (series rebaseadas o hechas por scripts) desempatan mal en la cola por fecha de `GraphWalk`. El ADR-0001 aceptaba el desorden por clock skew como raro, pero los empates pueden ser frecuentes. Todavía no está reproducido.
+
+---
+
 ## Para evaluar (comportamientos raros, no bugs)
 
 - Amend y cherry-pick resetean la fecha del autor. Git la conserva.
