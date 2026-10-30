@@ -75,6 +75,18 @@ for (const theme of ['dark', 'light']) {
     for (const fg of ['fg', 'muted', 'yellow-text', 'green-text', 'red-text', 'link']) check(`${fg} on the staged tint`, t[fg], tint, 4.5);
   });
 
+  test(`${theme}: text on the selected graph row stays readable (V-D)`, () => {
+    const m = css.match(/\.graph-row\.selected > rect:first-child[^{]*\{[^}]*color-mix\(in srgb,\s*var\(--([\w-]+)\)\s*(\d+)%,\s*var\(--([\w-]+)\)\)/);
+    assert.ok(m, 'the selected row background is a color-mix of two tokens');
+    const [, a, pct, b] = m;
+    const p = Number(pct) / 100;
+    const tint = `#${[1, 3, 5].map((i) => Math.round(parseInt(t[a].slice(i, i + 2), 16) * p + parseInt(t[b].slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
+    check('fg on the selected row', t.fg, tint, 4.5);
+    // The row's secondary text (hash, date) must switch to --fg there: --muted
+    // cannot reach 4.5:1 on a tint in the light theme.
+    assert.match(css, /\.graph-row\.selected \.graph-meta\s*\{[^}]*fill:\s*var\(--fg\)/);
+  });
+
   test(`${theme}: input borders reach 3:1 (UI components)`, () => {
     check('input border on bg', t['border-strong'], t.bg, 3);
     check('input border on bg2', t['border-strong'], t.bg2, 3);

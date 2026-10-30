@@ -339,7 +339,17 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 /* ---------- graph ---------- */
 .graph-wrap { flex: 1; overflow: auto; padding: 10px; }
 .graph-footer { padding: 8px 0 16px; text-align: center; }
-.graph-row:hover rect { fill: var(--bg3); }
+/* Hover paints the row's background rect only (it used to hit every rect in
+   the row, chips included). */
+.graph-row:hover > rect:first-child { fill: var(--bg3); }
+/* Persistent selection (V-D): a tint plus a 3px accent bar on the left. */
+.graph-row .sel-bar { fill: transparent; }
+.graph-row.selected > rect:first-child,
+.graph-row.selected:hover > rect:first-child { fill: color-mix(in srgb, var(--accent) 12%, var(--bg)); }
+.graph-row.selected .sel-bar { fill: var(--accent-solid); }
+/* --muted can't hold 4.5:1 on any tint in the light theme (it is 4.77 on the
+   plain background): on the selected row, hash and date use --fg. */
+.graph-row.selected .graph-meta { fill: var(--fg); }
 /* Keyboard focus on graph rows: Chrome draws no focus ring on SVG groups,
    so the row's background rect shows it (BACKLOG B-24). */
 .graph-row:focus { outline: none; }
@@ -348,6 +358,7 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 [role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .graph-msg { font-size: 12px; fill: var(--fg); }
 .graph-meta { font-size: 11px; fill: var(--muted); }
+.graph-hash { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; } /* hashes line up */
 
 /* ---------- right panel ---------- */
 .section { border-bottom: 1px solid var(--border); }

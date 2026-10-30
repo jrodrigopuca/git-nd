@@ -1,8 +1,17 @@
+import { friendlyDate, fullDate } from './ui.js';
+
 const COLORS = ['#4f9cf9', '#4dbd74', '#d8b04c', '#e5605e', '#b57edc', '#5bc8c4', '#e08e4e'];
 const ROW_H = 28;
 const COL_W = 16;
-const LANE_HEADROOM = 4; // spare lanes so later pages rarely move the text column
-const META_W = 150;      // reserved width for "hash · date" at the right edge
+// One spare lane (visual review V-D): with virtualization, outgrowing it only
+// redraws the visible rows, so a big reserve just left ~90px of dead gutter.
+const LANE_HEADROOM = 1;
+// Right-hand columns (V-D): date right-aligned at the edge, hash right-aligned
+// before it, in monospace so hashes line up.
+const DATE_RIGHT = 12;   // from the right edge
+const HASH_RIGHT = 104;  // from the right edge
+const META_W = 168;      // everything right of the message/chips
+const MIN_MESSAGE = 130; // floor for avatar + some message, so it never collapses
 const OVERSCAN = 20;     // rows drawn above and below the viewport
 
 const svgEl = (tag, attrs) => {
@@ -54,10 +63,11 @@ export class GraphView {
   }
 
   /** Start over with a first page. */
-  reset(commits, { tips = {}, headOid = null } = {}) {
+  reset(commits, { tips = {}, headOid = null, selectedOid = null } = {}) {
     this.branchTips = tips;     // oid → [{ name, remote, current }]
     this.tagTips = {};          // oid → [{ name, tag: true }]
     this.headOid = headOid;
+    this.selectedOid = selectedOid; // survives a rebuild of the view (V-D)
     this.commits = [];
     this.lane = new Map();
     this.row = new Map();
@@ -93,8 +103,7 @@ export class GraphView {
     if (this.lanesUsed > this.reservedLanes) {
       // Lanes outgrew the reserved column: move the text, redraw visible rows.
       this.setTextColumn(this.lanesUsed + LANE_HEADROOM);
-      for (const g of this.drawnRows.values()) g.remove();
-      this.drawnRows.clear();
+      this.redrawVisibleRows();
     }
     this.resize();
     this.update();
@@ -105,13 +114,7 @@ export class GraphView {
   setTags(tags) {
     this.tagTips = {};
     for (const [oid, names] of Object.entries(tags)) this.tagTips[oid] = names.map((name) => ({ name, tag: true }));
-    for (const [i, g] of this.drawnRows) {
-      const hadFocus = g === document.activeElement;
-      const fresh = this.drawRow(i);
-      g.replaceWith(fresh);
-      this.drawnRows.set(i, fresh); // keep the registry pointing at what is in the DOM
-      if (hadFocus) fresh.focus({ preventScroll: true });
-    }
+    this.redrawVisibleRows();
   }
 
   /** Keyboard: make row `i` the active one, bring it into view, draw it, focus it. */
@@ -205,9 +208,37 @@ export class GraphView {
   setTextColumn(lanes) {
     this.reservedLanes = lanes;
     this.textX = lanes * COL_W + 20;
-    this.width = Math.max(600, this.textX + 640);
+    this.width = this.fitWidth();
     this.metaX = this.width - META_W;
     this.resize();
+  }
+
+  /**
+   * The SVG is as wide as the panel (V-D) — a fixed textX + 640 clipped the
+   * date column. The floor depends on the lanes, not a fixed number: a fixed
+   * 560 was wider than the panel at 1180px (554px between sidebar and right
+   * column) and brought the horizontal scroll — and the clipping — back.
+   */
+  fitWidth() {
+    const panel = this.scroller ? this.scroller.clientWidth - 20 : 0; // #graph-wrap has 10px padding
+    return Math.max(this.textX + MIN_MESSAGE + META_W, panel);
+  }
+
+  /** Redraw the rows on screen (layout or selection changed), keeping keyboard focus. */
+  redrawVisibleRows() {
+    for (const [i, g] of this.drawnRows) {
+      const hadFocus = g === document.activeElement;
+      const fresh = this.drawRow(i);
+      g.replaceWith(fresh);
+      this.drawnRows.set(i, fresh);
+      if (hadFocus) fresh.focus({ preventScroll: true });
+    }
+  }
+
+  /** Persistent selection (V-D): the row last opened stays highlighted. */
+  select(oid) {
+    this.selectedOid = oid;
+    for (const [i, g] of this.drawnRows) g.classList.toggle('selected', this.commits[i].oid === oid);
   }
 
   resize() {
@@ -252,6 +283,14 @@ export class GraphView {
   /** Bring the DOM in line with the visible range: add what entered, drop what left. */
   update() {
     if (!this.commits.length) return;
+    // The panel changed width (window resize, drawer, sidebar): follow it (V-D).
+    const width = this.fitWidth();
+    if (Math.abs(width - this.width) > 1) {
+      this.width = width;
+      this.metaX = width - META_W;
+      this.resize();
+      this.redrawVisibleRows();
+    }
     const [first, last] = this.visibleRange();
 
     const focusedInGraph = this.svg.contains(document.activeElement);
@@ -326,8 +365,11 @@ export class GraphView {
     const { width, textX, metaX } = this;
     const cy = this.cy(i);
     const laneIdx = this.lane.get(c.oid);
-    const g = svgEl('g', { class: 'graph-row', style: 'cursor:pointer' });
+    const g = svgEl('g', { class: c.oid === this.selectedOid ? 'graph-row selected' : 'graph-row', style: 'cursor:pointer' });
+    // Background rect FIRST (hover, focus and selection paint it), then the
+    // 3px selection bar (V-D), visible only on the selected row.
     g.append(svgEl('rect', { x: 0, y: cy - ROW_H / 2, width, height: ROW_H, fill: 'transparent' }));
+    g.append(svgEl('rect', { class: 'sel-bar', x: 0, y: cy - ROW_H / 2, width: 3, height: ROW_H }));
 
     const isHead = c.oid === this.headOid;
     g.append(svgEl('circle', {
@@ -355,9 +397,12 @@ export class GraphView {
     const drawChip = (shown, tooltip, { color, current = false, remote = false }) => {
       const w = labelWidth(shown);
       const chip = svgEl('g', {});
+      // Chips read as labels, not buttons (V-D, GitKraken pattern): a light
+      // tint of their color, radius 4. Remote refs stay dashed, so they are
+      // not told apart by color alone; the current branch stays solid.
       chip.append(svgEl('rect', {
-        x, y: cy - 9, width: w, height: 18, rx: 9,
-        fill: current ? color : 'transparent',
+        class: 'chip-bg', x, y: cy - 9, width: w, height: 18, rx: 4,
+        style: `fill: ${current ? color : `color-mix(in srgb, ${color} 16%, transparent)`}`,
         stroke: color, 'stroke-width': 1.2,
         'stroke-dasharray': remote ? '3,2' : 'none',
       }));
@@ -419,16 +464,19 @@ export class GraphView {
         msg.append(tip);
       }
     }
-    // Author lives in the avatar; keep the meta line lean. Anchored to the
-    // right edge so it stays put regardless of message/chip length.
-    const meta = svgEl('text', { x: width - 10, y: cy + 4, 'text-anchor': 'end', class: 'graph-meta' });
-    // Same date format as the History list (date only; date + time on hover).
-    meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
-    const metaTip = svgEl('title', {});
-    metaTip.textContent = new Date(c.date).toLocaleString();
-    meta.append(metaTip);
-    g.append(msg, meta);
-    if (this.onSelect) g.addEventListener('click', () => { this.setActiveRow(i); this.onSelect(c); });
+    // Author lives in the avatar. Hash and date are two right-aligned columns
+    // anchored to the right edge (V-D): hashes line up (monospace), and the
+    // date is relative — the same wording as the History list — with the
+    // exact moment on hover.
+    const hash = svgEl('text', { x: width - HASH_RIGHT, y: cy + 4, 'text-anchor': 'end', class: 'graph-meta graph-hash' });
+    hash.textContent = c.oid.slice(0, 7);
+    const date = svgEl('text', { x: width - DATE_RIGHT, y: cy + 4, 'text-anchor': 'end', class: 'graph-meta graph-date' });
+    date.textContent = friendlyDate(c.date);
+    const dateTip = svgEl('title', {});
+    dateTip.textContent = fullDate(c.date);
+    date.append(dateTip);
+    g.append(msg, hash, date);
+    if (this.onSelect) g.addEventListener('click', () => { this.setActiveRow(i); this.select(c.oid); this.onSelect(c); });
     // Keyboard (BACKLOG B-24): one tab stop (roving tabindex), ↑/↓ to move,
     // Enter/Space to open the commit.
     g.setAttribute('tabindex', i === this.activeRow ? '0' : '-1');
@@ -440,6 +488,7 @@ export class GraphView {
         this.focusRow(i + (e.key === 'ArrowDown' ? 1 : -1));
       } else if ((e.key === 'Enter' || e.key === ' ') && this.onSelect) {
         e.preventDefault();
+        this.select(c.oid);
         this.onSelect(c);
       }
     });

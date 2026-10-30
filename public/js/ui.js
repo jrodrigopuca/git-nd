@@ -1,3 +1,21 @@
+/**
+ * Short, human date for lists and the graph (visual review V-D): "just now",
+ * "12 min ago", "3 h ago", "2 d ago", then "Oct 29" (this year) or
+ * "Oct 29, 2024". Pair it with fullDate() in a title for the exact moment.
+ * Relative values are computed at render time; a refresh renders them again.
+ */
+export function friendlyDate(ms, now = Date.now()) {
+  const s = Math.round((now - ms) / 1000);
+  if (s < 60 && s > -60) return 'just now';
+  if (s > 0 && s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s > 0 && s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  if (s > 0 && s < 7 * 86400) return `${Math.floor(s / 86400)} d ago`;
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date(now).getFullYear();
+  return d.toLocaleDateString(undefined, sameYear ? { month: 'short', day: 'numeric' } : { year: 'numeric', month: 'short', day: 'numeric' });
+}
+export const fullDate = (ms) => new Date(ms).toLocaleString();
+
 const NATIVELY_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY', 'OPTION', 'LABEL']);
 
 /**

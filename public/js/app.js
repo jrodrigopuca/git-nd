@@ -1,5 +1,5 @@
 import { api, withUi, onEvent } from './api.js';
-import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren, makeActivatable } from './ui.js';
+import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren, makeActivatable, friendlyDate, fullDate } from './ui.js';
 import { refreshTree, setStatusMap, setOpenFileHandler, initTreeDnD } from './tree.js';
 import { renderDiff } from './diff.js';
 import { GraphView } from './graph.js';
@@ -546,7 +546,7 @@ function renderHistory(commits) {
       el('div', { class: 'cmeta' },
         el('span', { class: 'chash' }, c.oid.slice(0, 7)),
         el('span', {}, c.author),
-        el('span', { title: new Date(c.date).toLocaleString() }, new Date(c.date).toLocaleDateString()),
+        el('span', { title: fullDate(c.date) }, friendlyDate(c.date)),
       ),
     )));
 }
@@ -588,7 +588,9 @@ function renderGraphTab(page, epoch) {
     return;
   }
   const wrap = $('graph-wrap');
-  const scrollTop = graph.dir === repo.dir ? wrap.scrollTop : 0;
+  const sameRepo = graph.dir === repo.dir;
+  const scrollTop = sameRepo ? wrap.scrollTop : 0;
+  if (!sameRepo) graph.selectedOid = null; // a selection belongs to its repo
   Object.assign(graph, {
     dir: repo.dir, walkId: page.walkId, loaded: page.commits.length, done: page.done, busy: false,
   });
@@ -599,9 +601,10 @@ function renderGraphTab(page, epoch) {
     wrap.replaceChildren(el('p', { class: 'muted' }, 'No commits.'));
     return;
   }
-  graph.view = new GraphView({ onSelect: commitActions, scroller: wrap });
+  // The selected row survives rebuilds of the view (refs moved, a reload) — V-D.
+  graph.view = new GraphView({ onSelect: (c) => { graph.selectedOid = c.oid; commitActions(c); }, scroller: wrap });
   wrap.replaceChildren(
-    graph.view.reset(page.commits, { tips: page.tips, headOid: page.headOid }),
+    graph.view.reset(page.commits, { tips: page.tips, headOid: page.headOid, selectedOid: graph.selectedOid }),
     el('div', { class: 'graph-footer', id: 'graph-footer' }),
   );
   wrap.scrollTop = scrollTop;
@@ -891,7 +894,7 @@ async function renderMergeView() {
           el('div', { class: 'cmeta' },
             el('span', { class: 'chash' }, c.oid.slice(0, 7)),
             el('span', {}, c.author),
-            el('span', { title: new Date(c.date).toLocaleString() }, new Date(c.date).toLocaleDateString())),
+            el('span', { title: fullDate(c.date) }, friendlyDate(c.date))),
         ))),
     ),
 

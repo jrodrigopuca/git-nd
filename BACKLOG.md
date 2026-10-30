@@ -431,7 +431,7 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - **Contraste:** el texto gris sobre el tinte daba 4,55:1 en claro, apenas por encima del mínimo. `test/contrast.test.js` ahora lee el porcentaje real de `color-mix` y verifica todo el texto que va encima.
   - **Test:** `e2e/commit-panel.spec.js`, 5 tests. Con el código anterior fallan los 5. Cubre el autor, los estados del botón, Ctrl+S, amend, el merge y el caso sin autor.
 
-### V-D `[ ]` 🟡 Legibilidad del grafo
+### V-D `[x]` 🟡 Legibilidad del grafo
 
 - **Propuesta:**
   - sin el espacio vacío entre las lanes y el texto;
@@ -441,6 +441,15 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - chips con relleno.
 
   Mantiene las filas de 28 px, la virtualización, el roving tabindex y los tests. Esfuerzo M.
+- **Cerrado:**
+  - **Espacio muerto:** la reserva de lanes extra bajó de 4 a 1. El espacio entre las lanes y el texto pasó de ~90 a ~42 px.
+  - **Ancho del SVG:** sigue al panel (`fitWidth()` con el `ResizeObserver` existente) y, al cambiar, redibuja solo las filas visibles. El mínimo depende de las lanes: un mínimo fijo de 560 px resultó más ancho que el panel a 1180 px (554 px) y volvía a cortar la fecha.
+  - **Columnas:** hash en monoespaciada y fecha **relativa** (`friendlyDate` en `ui.js`, también usada por el historial), alineados a la derecha, con la fecha completa en `<title>`.
+  - **Selección persistente:** tinte del 12% y barra de 3 px. Sobrevive al scroll virtual y a la reconstrucción del grafo. En la fila seleccionada el hash y la fecha usan `--fg`, porque en el tema claro `--muted` no llega a 4,5:1 sobre ningún tinte (con 16% daba 3,80:1; lo detectó el test).
+  - **Chips:** tinte del color de la lane y radio 4.
+  - **Hover:** ahora pinta solo el fondo de la fila; antes alcanzaba también los chips.
+  - **Test:** `e2e/graph-readability.spec.js`, 4 tests (espacio muerto, ancho a 1180 y 1600 px sin fechas cortadas, columnas, selección). Con el código anterior fallan los 4. `test/contrast.test.js` verifica el texto sobre la fila seleccionada.
+  - **Límite aceptado:** las fechas relativas se calculan al dibujar, así que con la vista abierta mucho tiempo envejecen hasta el próximo refresco.
 
 ### V-E `[x]` 🟠 Por debajo de 980 px no se puede commitear
 
