@@ -263,18 +263,23 @@ function renderChanges(status) {
   const item = (f, isStaged) => {
     const st = f.conflicted ? 'conflicted' : (isStaged ? f.stageStatus : f.workStatus);
     const label = { modified: 'M', untracked: 'U', deleted: 'D', added: 'A', conflicted: '!' }[st] || '';
+    // Keyboard-operable row (BACKLOG B-23): the file name is a real <button>
+    // (it was a clickable <span>, unreachable with Tab), and every button has
+    // an aria-label naming its file — the visible text is just a symbol.
     return el('li', {},
-      el('span', { class: `st st-${st}` }, label),
-      el('span', {
-        class: 'fname', title: f.filepath,
+      el('span', { class: `st st-${st}`, 'aria-hidden': 'true' }, label),
+      el('button', {
+        type: 'button', class: 'fname', title: f.filepath,
+        'aria-label': f.conflicted ? `Resolve conflict in ${f.filepath}`
+          : `Show ${isStaged ? 'staged' : 'unstaged'} changes in ${f.filepath}`,
         onclick: () => f.conflicted ? openConflictEditor(f.filepath) : showWorkdirDiff(f.filepath, isStaged),
       }, f.filepath),
       el('span', { class: 'actions' },
         isStaged
-          ? el('button', { class: 'btn btn-ghost btn-xs', title: 'Unstage', onclick: () => act('unstage', f.filepath) }, '−')
-          : el('button', { class: 'btn btn-ghost btn-xs', title: 'Stage', onclick: () => act('stage', f.filepath) }, '＋'),
+          ? el('button', { class: 'btn btn-ghost btn-xs', title: 'Unstage', 'aria-label': `Unstage ${f.filepath}`, onclick: () => act('unstage', f.filepath) }, '−')
+          : el('button', { class: 'btn btn-ghost btn-xs', title: 'Stage', 'aria-label': `Stage ${f.filepath}`, onclick: () => act('stage', f.filepath) }, '＋'),
         !isStaged && el('button', {
-          class: 'btn btn-ghost btn-xs', title: 'Discard changes',
+          class: 'btn btn-ghost btn-xs', title: 'Discard changes', 'aria-label': `Discard changes to ${f.filepath}`,
           onclick: async () => {
             if (await confirmModal('Discard changes', `Local changes to ${f.filepath} will be lost. Are you sure?`)) {
               act('discard', f.filepath);

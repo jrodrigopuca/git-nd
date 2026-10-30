@@ -319,9 +319,53 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 
 ---
 
-## Para evaluar (comportamientos raros, no bugs)
+### B-23 `[x]` 🟠 La lista de Changes no se puede usar con teclado
 
-- **Accesibilidad:** los botones de cada fila de Changes (Stage, Unstage, Discard) tienen `display: none` hasta que pasa el mouse por encima, así que **no se pueden alcanzar con el teclado**. Lo destapó el E2E, que tiene que hacer hover antes del click.
+- **Dónde:** `public/js/app.js` → `renderChanges`; `public/css/style.css` → `.file-list`
+- **Descripción:** había tres problemas en cada fila de Changes:
+  1. Las acciones (Stage, Unstage, Discard) tenían `display: none` hasta el hover, así que Tab las salteaba.
+  2. El nombre del archivo, que abre el diff o el editor de conflictos, era un `<span>` con `onclick` y no se podía enfocar nunca.
+  3. Los botones mostraban solo un símbolo (`＋`, `−`, `↺`), sin nombre para lectores de pantalla.
+
+  Lo destapó el E2E, que tenía que hacer hover antes de cada click.
+- **Criterios de aceptación:**
+  - [x] Con solo teclado: Tab llega al nombre de cada archivo y a sus acciones, y Enter abre el diff, stagea o descarta (con confirmación).
+  - [x] Una acción enfocada se ve, aunque el mouse no esté encima.
+  - [x] Cada botón tiene un nombre accesible con su archivo ("Stage README.md").
+  - [x] Sin cambio visual en reposo ni en hover.
+- **Cerrado:**
+  - **Nombre del archivo:** pasa a ser un `<button>` con estilo de texto.
+  - **Acciones:** en reposo tienen ancho 0 con `overflow: hidden`, en lugar de `display: none`, así que siguen en el orden de Tab. Se expanden con `:hover` o `:focus-within`, y en pantallas táctiles se ven siempre.
+  - **Nombres accesibles:** `aria-label` con el archivo en cada botón.
+  - **Test:** `e2e/a11y.spec.js` (recorrido solo con teclado). Con el código anterior falla, ahora pasa.
+  - **Visual:** comparé capturas antes y después, en reposo y en hover. Una primera versión con `opacity: 0` recortaba de más los nombres largos en reposo; se descartó.
+  - **Corrección a un diagnóstico mío:** había dicho que faltaba un estilo de foco visible, pero Chrome ya dibuja su anillo por defecto (no hay `outline: none`). Quedó como test de regresión.
+
+### B-24 `[ ]` 🟠 Otros elementos clickeables que solo responden al mouse
+
+- **Dónde:** unos 15 lugares en `public/js/app.js` (con `el('li', { onclick })`), `public/js/tree.js` (filas del árbol) y `public/js/graph.js` (filas del grafo, `<g>` de SVG).
+- **Descripción:** mismo problema que B-23. Afecta a:
+  - las listas de recientes y de carpetas del Explorer;
+  - los repos remotos;
+  - el selector de modo de pull;
+  - el historial y la lista de commits del merge;
+  - los archivos de un commit;
+  - el cambio de rama;
+  - los PRs e issues;
+  - el Quick open;
+  - el árbol de archivos;
+  - las filas del grafo.
+
+  Ninguno se puede enfocar ni activar con teclado.
+- **Arreglo propuesto (toda la clase de una vez):** que el helper `el()` de `public/js/ui.js` haga operable con teclado cualquier elemento no interactivo que reciba `onclick`, con `tabindex="0"`, `role="button"` y Enter/Espacio para activarlo. El árbol y el grafo no usan `el()` y necesitan lo mismo a mano. En el grafo virtualizado hay que cuidar el foco cuando la fila enfocada sale de la franja dibujada.
+- **Criterios de aceptación:**
+  - [ ] Cada elemento de la lista se alcanza con Tab y se activa con Enter.
+  - [ ] El foco es visible en todos.
+  - [ ] Un E2E por flujo principal: abrir un repo reciente, ver un commit, cambiar de rama y navegar el árbol.
+
+---
+
+## Para evaluar (comportamientos raros, no bugs)
 
 - Amend y cherry-pick resetean la fecha del autor. Git la conserva.
 - Rebase y cherry-pick ignoran el modo del archivo y los symlinks: un symlink re-aplicado queda como archivo común.

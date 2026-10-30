@@ -335,9 +335,15 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
   padding: 3px 12px; cursor: pointer; font-size: 12px;
 }
 .file-list li:hover, .branch-list li:hover { background: var(--bg3); }
-.file-list .fname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.file-list .actions { display: none; gap: 2px; }
-.file-list li:hover .actions { display: flex; }
+.file-list .fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+/* In Changes the file name is a <button> (keyboard-operable, BACKLOG B-23): look like text. */
+.file-list button.fname { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; }
+/* Row actions: collapsed to zero width at rest — not display:none, which takes
+   them out of the Tab order — and expanded on hover OR while focus is inside
+   the row. Zero width (not opacity) keeps the file name's full width at rest. */
+.file-list .actions { display: flex; gap: 2px; max-width: 0; overflow: hidden; }
+.file-list li:hover .actions, .file-list li:focus-within .actions { max-width: none; overflow: visible; }
+@media (hover: none) { .file-list .actions { max-width: none; overflow: visible; } } /* touch: there is no hover */
 
 .branch-list .current { font-weight: 700; color: var(--accent); }
 .branch-list .bname { flex: 1; overflow: hidden; text-overflow: ellipsis; }
