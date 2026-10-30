@@ -1,6 +1,6 @@
 {
   "name": "git-nd",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Local web GUI for managing Git repositories (isomorphic-git + Express)",
   "type": "module",
   "engines": {

@@ -7,6 +7,7 @@ Cliente Git local con interfaz web. Corre en `http://localhost:3847` y maneja re
 - [Arquitectura](docs/architecture.md): componentes, dónde vive el estado, límites de confianza, reglas de consistencia, eventos
 - [Cómo funciona](docs/flows.md): diagramas de secuencia de abrir un repo, cambios externos, commit, push y tokens, conflictos de merge, el grafo paginado, conectar una cuenta, clonar
 - [Registros de decisiones](docs/adr/README.md): las decisiones caras de revertir, y por qué se tomaron
+- [CHANGELOG.md](CHANGELOG.md): qué trae cada versión, plataformas probadas y limitaciones conocidas
 - [BACKLOG.md](BACKLOG.md): bugs conocidos, sus fixes y el test que prueba cada uno
 
 ## Inicio rápido
