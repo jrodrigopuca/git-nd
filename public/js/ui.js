@@ -52,6 +52,24 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+/**
+ * An icon from the local sprite (public/icons/sprite.svg, Lucide + Simple
+ * Icons). Decorative by default (aria-hidden): the control around it carries
+ * the name. Pass { label } only when the icon itself is the information.
+ * Color is the text color (currentColor) — style it with tokens, never fills.
+ */
+const SVG_NS = 'http://www.w3.org/2000/svg';
+export function icon(name, { label, className = '' } = {}) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', `icon ${className}`.trim());
+  svg.setAttribute('focusable', 'false');
+  if (label) { svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', label); } else svg.setAttribute('aria-hidden', 'true');
+  const use = document.createElementNS(SVG_NS, 'use');
+  use.setAttribute('href', `/icons/sprite.svg#i-${name}`);
+  svg.append(use);
+  return svg;
+}
+
 export function toast(message, kind = 'info', ms = 3500) {
   const box = document.getElementById('toasts');
   const node = el('div', { class: `toast ${kind}` }, message);

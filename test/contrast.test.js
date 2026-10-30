@@ -87,6 +87,10 @@ for (const theme of ['dark', 'light']) {
     assert.match(css, /\.graph-row\.selected \.graph-meta\s*\{[^}]*fill:\s*var\(--fg\)/);
   });
 
+  test(`${theme}: the brand leaf reaches 3:1 (graphical object) on every surface`, () => {
+    for (const bg of ['bg', 'bg2', 'bg3']) check(`brand on ${bg}`, t.brand, t[bg], 3);
+  });
+
   test(`${theme}: input borders reach 3:1 (UI components)`, () => {
     check('input border on bg', t['border-strong'], t.bg, 3);
     check('input border on bg2', t['border-strong'], t.bg2, 3);

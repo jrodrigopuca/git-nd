@@ -485,12 +485,23 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
   - Sin atajo Ctrl/Cmd+B por ahora: pisa los marcadores de Firefox.
   - Test: `e2e/files-collapse.spec.js`, 5 tests. Con el código anterior fallan los 5.
 
-### R2-3 `[ ]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
+### R2-3 `[~]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
+- **Base hecha:**
+  - `public/icons/sprite.svg`: 63 símbolos sin modificar, más la hoja, con sus licencias en `public/icons/LICENSE`.
+  - Helper `icon(name, { label })` en `ui.js`, decorativo (`aria-hidden`) por defecto.
+  - `.icon` y `.btn-icon`. El toggle de Files ya usa el sprite.
+- **Tests:**
+  - `test/icons.test.js`: el sprite no tiene ids internos, máscaras ni colores fijos; todo ícono referenciado existe; la licencia está; la marca y el favicon son correctos.
+  - `e2e/icons.spec.js`: la marca se pinta con `--brand` en los dos temas y no hay requests a otro origen.
+- **Falta:** reemplazar los emojis por zona: topbar y activity bar → árbol y `fileIcon` → paneles, modales y toasts → grafo, actualizando los 3 E2E que buscan 🏷/▶/⚠. Al final, un test que no encuentre ningún `\p{Extended_Pictographic}` en `public/`.
 ### R2-4 `[x]` 🟠 `tree.js` detecta carpetas leyendo el texto del twisty
 - Con un twisty SVG, todo drop iría a la carpeta padre.
 - **Cerrado:** el `.tree-node` lleva `data-type` y el drop decide con ese dato.
 - **Test:** 3 E2E de drop en `e2e/files-collapse.spec.js`: sobre una carpeta, sobre un archivo dentro de una carpeta, y con el twisty vacío. Con el código anterior falla el tercero.
-### R2-5 `[ ]` 🟡 Marca: una sola hoja (en iteración a partir de la referencia del usuario, teal)
+### R2-5 `[x]` 🟡 Marca: una sola hoja
+- **Diseño:** la variante "Viento" (c), elegida por el usuario en la tercera iteración a partir de su referencia. Es una hoja en S con el nodo de commit recortado (evenodd), así que funciona en los dos temas sin un blanco fijo.
+- **Color:** `--brand` es `#008080` en claro y `#2aa8a2` en oscuro, ≥3:1 sobre bg/bg2/bg3. `test/contrast.test.js` lo verifica.
+- **Favicon:** `public/icons/favicon.svg` está dibujado sobre su propia grilla de 16 px, en un solo color `#0a8f8a`. Reemplaza el data-URI con 🌿.
 ### R2-6 `[ ]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
 ### R2-7 `[ ]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"
 

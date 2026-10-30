@@ -1,0 +1,29 @@
+Third-party icons in sprite.svg
+===============================
+
+The brand leaf (i-leaf-brand) and favicon.svg are git-nd's own and follow the
+project's license. Everything else in sprite.svg is vendored, unmodified apart
+from being wrapped in <symbol> elements:
+
+- Lucide v0.460.0 (https://lucide.dev) — ISC License, text below.
+- Simple Icons v13.21.0 (https://simpleicons.org), i-github and i-gitlab only —
+  CC0 1.0 Universal (public domain dedication). GitHub and GitLab are
+  trademarks of their owners; the marks only identify those providers.
+
+
+Lucide — ISC License
+--------------------
+
+Copyright (c) for portions of Lucide are held by Cole Bemis 2013-2022 as part of Feather (MIT). All other copyright (c) for Lucide are held by Lucide Contributors 2022.
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
