@@ -519,7 +519,12 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
   - **Por qué se cambió:** ux-ui midió que el peso de la hoja rellena estaba en el rango de los demás íconos. Lo que chocaba era la textura y la gramática: la única mancha sólida en una barra de íconos de línea, pegada a los bordes del viewBox.
   - **Hoja:** de trazo 2 con puntas redondeadas, como Lucide. Nace de un commit y va en `--fg`.
   - **Nodo:** el único acento, un punto relleno en `--brand`, como los nodos del grafo. Va con `style="fill: var(--brand)"` y no como atributo, porque `var()` en un atributo de presentación no es portable.
-  - **Favicon:** sólido, con la misma silueta en `#0a8f8a`. A 16 px la versión de línea se desarma.
+  - **Favicon:** primero, sólido y todo teal. A 16 px la versión de línea se desarma.
+  - **Favicon F1 (iteración 5, elegido por el usuario):**
+    - **Por qué se cambió:** el favicon todo teal no repetía la idea de P3 y ocupaba la mitad del cuadro, así que a 16 px se leía como una cuchara.
+    - **Diseño:** una hoja maciza neutra con la nervadura calada y el nodo teal. Llena la grilla de 16 y el nodo queda alineado a los pixeles.
+    - **Colores por tema:** sigue `prefers-color-scheme`, con la hoja en `--fg` y el nodo en `--brand` de cada tema. Tiene un gris de respaldo (`#7d8089`) para cuando la media query no aplica o el tema de Chrome no coincide con el del sistema.
+    - **Test (`test/icons.test.js`):** los colores de cada tema son los tokens de `style.css`, y el respaldo de la hoja y del nodo da ≥3:1 sobre las 4 pestañas típicas. Lo verifiqué renderizado con Chrome en los esquemas claro y oscuro. Lo de Safari no está verificado.
   - **Tests:** `test/icons.test.js` (gramática de trazo, nodo en `--brand`, favicon sólido) y `e2e/icons.spec.js` (la línea en `--fg` en los dos temas). La verificación visual del topbar en los dos temas y del favicon confirma que el nodo sale teal a través del `<use>`.
 ### R2-6 `[x]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
 - **Tarjetas:** una columna de hasta 720 px. Cada encabezado tiene el logo, el nombre y el estado ("Not connected", o "Connected" en `--green-text`).

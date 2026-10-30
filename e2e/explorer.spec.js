@@ -80,8 +80,12 @@ test('a folder that is a repo: one primary action; repos listed before folders',
   // The repos root: R is a repo, aaa-plain-folder is not (and sorts first by name).
   await page.locator('#ex-path').fill(repos.root);
   await page.locator('#ex-path').press('Enter');
-  const names = await page.locator('#ex-dirs li .ex-name').allTextContents();
-  expect(names.indexOf('R')).toBeLessThan(names.indexOf('aaa-plain-folder'));
+  // Retrying: allTextContents() reads at once, and on a slow run that was the
+  // previous listing (both indexOf → -1).
+  await expect.poll(async () => {
+    const names = await page.locator('#ex-dirs li .ex-name').allTextContents();
+    return names.includes('aaa-plain-folder') && names.indexOf('R') < names.indexOf('aaa-plain-folder');
+  }, { message: 'repos are listed before plain folders' }).toBe(true);
   await expect(page.locator('#ex-dirs li', { hasText: 'R' }).first().locator('.ex-go')).toHaveText(/Open/);
 
   // Inside the repo folder.

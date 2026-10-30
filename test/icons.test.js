@@ -63,10 +63,45 @@ test('brand (P3): a line leaf in the Lucide grammar, rooted in a commit node fil
 
   const html = fs.readFileSync(pub('index.html'), 'utf8');
   assert.match(html, /<link rel="icon" href="\/icons\/favicon\.svg" type="image\/svg\+xml"/);
+});
+
+test('favicon (F1): a solid neutral leaf + the teal node, following the theme, with a fallback that works on any tab', () => {
   const fav = fs.readFileSync(pub('icons/favicon.svg'), 'utf8');
   assert.match(fav, /viewBox="0 0 16 16"/, 'drawn on its own 16px grid');
-  // The tab needs a SOLID mark: a 1.5px line falls apart at a real 16px raster.
-  assert.match(fav, /<path fill="#[0-9a-f]{6}"/i);
-  assert.match(fav, /<circle [^>]*fill="#[0-9a-f]{6}"/i);
   assert.doesNotMatch(fav, /\p{Extended_Pictographic}/u);
+  // Solid leaf (a 1.5px line falls apart at a real 16px raster) and the node.
+  assert.match(fav, /<path class="lf"/);
+  assert.match(fav, /<circle [^>]*class="d"/);
+
+  const style = fav.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '';
+  const colorsIn = (block) => ({
+    leaf: block.match(/\.lf\{fill:(#[0-9a-f]{6})\}/i)?.[1],
+    node: block.match(/\.d\{fill:(#[0-9a-f]{6})\}/i)?.[1],
+  });
+  const media = (scheme) => style.match(new RegExp(`@media \\(prefers-color-scheme:${scheme}\\)\\{(.*?\\})\\}`))?.[1] ?? '';
+  const fallback = colorsIn(style.replace(/@media[^{]*\{(?:[^{}]*\{[^}]*\})*[^}]*\}/g, ''));
+
+  // In each theme it is the app's own mark: leaf = --fg, node = --brand.
+  const css = fs.readFileSync(pub('css/style.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const token = (theme, name) => css.match(new RegExp(`:root\\[data-theme="${theme}"\\]\\s*\\{[^}]*--${name}:\\s*(#[0-9a-f]{6})`, 'i'))?.[1]?.toLowerCase();
+  for (const theme of ['light', 'dark']) {
+    const c = colorsIn(media(theme));
+    assert.equal(c.leaf?.toLowerCase(), token(theme, 'fg'), `${theme}: leaf is --fg`);
+    assert.equal(c.node?.toLowerCase(), token(theme, 'brand'), `${theme}: node is --brand`);
+  }
+
+  // Without the media query (or with a Chrome theme that disagrees with the
+  // system), the fallback must still read on every usual tab color (3:1).
+  const lum = (hex) => {
+    const c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a, b) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+  for (const tab of ['#ffffff', '#dee1e6', '#35363a', '#202124']) {
+    for (const part of ['leaf', 'node']) {
+      assert.ok(fallback[part], `fallback ${part} color`);
+      const r = ratio(fallback[part], tab);
+      assert.ok(r >= 3, `fallback ${part} ${fallback[part]} on tab ${tab} is ${r.toFixed(2)}:1`);
+    }
+  }
 });
