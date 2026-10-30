@@ -304,6 +304,12 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 .graph-wrap { flex: 1; overflow: auto; padding: 10px; }
 .graph-footer { padding: 8px 0 16px; text-align: center; }
 .graph-row:hover rect { fill: var(--bg3); }
+/* Keyboard focus on graph rows: Chrome draws no focus ring on SVG groups,
+   so the row's background rect shows it (BACKLOG B-24). */
+.graph-row:focus { outline: none; }
+.graph-row:focus-visible rect:first-child { fill: var(--bg3); stroke: var(--accent); stroke-width: 1.5px; }
+/* Same accent ring for every clickable non-control made keyboard-operable. */
+[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .graph-msg { font-size: 12px; fill: var(--fg); }
 .graph-meta { font-size: 11px; fill: var(--muted); }
 

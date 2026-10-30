@@ -315,7 +315,7 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
 - **Descripción:** `openModal` le daba el foco al primer campo 30 ms después de abrir. Si en ese lapso el usuario (o un test) ya había pasado al segundo campo, el foco volvía al primero en pleno tipeo, y el texto caía en el campo equivocado. En el modal de clonado, la ruta destino terminaba en el campo URL. Afecta a todos los modales.
 - **Verificado:** `e2e/clone.spec.js` repetido 12 veces: fallaba 3 de 12, con la ruta en el campo URL. Con el arreglo, 24 de 24.
 - **Cerrado:** el autofocus solo actúa si el foco todavía no entró al modal.
-- **Probable efecto colateral (inferido, sin demostrar):** desde este arreglo desapareció un cuelgue intermitente al cerrar el worker de Playwright (17 corridas completas seguidas sin cuelgue; antes, alrededor de 1 de cada 3). La hipótesis: el clon contra una URL deformada dejaba un pedido abierto en el `node-git-server` del test.
+- **Corrección (2026-10-30):** en un primer momento atribuí a este bug un cuelgue intermitente de las corridas E2E (5 a 16 minutos al cerrar el worker). **Era falso.** El registro de energía (`pmset -g log`) muestra que todas las corridas colgadas coinciden con suspensiones de la Mac por inactividad, y ninguna de las normales. No es un problema de la app ni de los tests. Si una corrida E2E tarda minutos de más, conviene revisar primero si la máquina se durmió.
 
 ---
 
@@ -341,7 +341,7 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
   - **Visual:** comparé capturas antes y después, en reposo y en hover. Una primera versión con `opacity: 0` recortaba de más los nombres largos en reposo; se descartó.
   - **Corrección a un diagnóstico mío:** había dicho que faltaba un estilo de foco visible, pero Chrome ya dibuja su anillo por defecto (no hay `outline: none`). Quedó como test de regresión.
 
-### B-24 `[ ]` 🟠 Otros elementos clickeables que solo responden al mouse
+### B-24 `[x]` 🟠 Otros elementos clickeables que solo responden al mouse
 
 - **Dónde:** unos 15 lugares en `public/js/app.js` (con `el('li', { onclick })`), `public/js/tree.js` (filas del árbol) y `public/js/graph.js` (filas del grafo, `<g>` de SVG).
 - **Descripción:** mismo problema que B-23. Afecta a:
@@ -359,9 +359,17 @@ Origen: revisión completa del proyecto del 2026-10-29 (lógica git, seguridad y
   Ninguno se puede enfocar ni activar con teclado.
 - **Arreglo propuesto (toda la clase de una vez):** que el helper `el()` de `public/js/ui.js` haga operable con teclado cualquier elemento no interactivo que reciba `onclick`, con `tabindex="0"`, `role="button"` y Enter/Espacio para activarlo. El árbol y el grafo no usan `el()` y necesitan lo mismo a mano. En el grafo virtualizado hay que cuidar el foco cuando la fila enfocada sale de la franja dibujada.
 - **Criterios de aceptación:**
-  - [ ] Cada elemento de la lista se alcanza con Tab y se activa con Enter.
-  - [ ] El foco es visible en todos.
-  - [ ] Un E2E por flujo principal: abrir un repo reciente, ver un commit, cambiar de rama y navegar el árbol.
+  - [x] Cada elemento de la lista se alcanza con Tab y se activa con Enter.
+  - [x] El foco es visible en todos.
+  - [x] Un E2E por flujo principal: abrir un repo reciente, ver un commit, cambiar de rama y navegar el árbol.
+- **Cerrado:**
+  - **`el()`** (`public/js/ui.js`): un elemento no interactivo con `onclick` pasa a tener `tabindex="0"` y `role="button"`, y Enter o Espacio lo activan (con `makeActivatable`). Si el foco está en un control anidado, la tecla no dispara la fila. Esto cubre las 13 listas.
+  - **Árbol:** usa el mismo helper y además lleva `aria-expanded` y `aria-label`.
+  - **Grafo:** usa *roving tabindex*. Todo el grafo es un solo punto de Tab, ↑/↓ recorren las filas desplazando la lista virtual y Enter abre el commit. La fila con foco nunca se descarta al virtualizar.
+  - **Merge:** solo las filas en conflicto son clickeables; antes las auto-mergeadas habrían sido paradas de Tab vacías.
+  - **Foco visible:** anillo de acento en `[role="button"]`, y resaltado de la fila en el grafo (Chrome no dibuja el anillo en grupos SVG).
+  - **Test:** `e2e/a11y-keyboard.spec.js`, 7 tests. Con el código anterior fallan los 7, ahora pasan.
+  - **Regresión:** 5 corridas completas. Las 4 con la máquina despierta pasaron 25/25. La restante coincidió con una suspensión (ver la corrección en B-22).
 
 ---
 

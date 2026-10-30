@@ -1,5 +1,5 @@
 import { api, withUi, onEvent } from './api.js';
-import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren } from './ui.js';
+import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren, makeActivatable } from './ui.js';
 import { refreshTree, setStatusMap, setOpenFileHandler, initTreeDnD } from './tree.js';
 import { renderDiff } from './diff.js';
 import { GraphView } from './graph.js';
@@ -753,7 +753,9 @@ async function renderMergeView() {
   const pct = s.totalConflicts ? Math.round((resolvedCount / s.totalConflicts) * 100) : 100;
 
   const fileRow = (f) => el('li', {
-    onclick: () => f.conflicted && openConflictEditor(f.filepath),
+    // Only conflicted rows do something: only they are clickable — and, through
+    // el(), keyboard tab stops (B-24). Auto-merged rows stay plain text.
+    onclick: f.conflicted ? () => openConflictEditor(f.filepath) : undefined,
     style: f.conflicted ? '' : 'cursor:default',
   },
     el('span', { class: `st st-${f.conflicted ? (f.resolved ? 'untracked' : 'conflicted') : 'modified'}` },
@@ -1324,6 +1326,7 @@ $('btn-create-pr').addEventListener('click', async () => {
                 el('span', { class: 'fname' }, f.filepath),
               );
               li.addEventListener('click', () => toggleInlineDiff(li, f, cmp));
+              makeActivatable(li); // the listener above is not set through el(): keyboard too (B-24)
               return li;
             })),
       notPushed && el('p', { class: 'muted', style: 'padding:0 12px' },

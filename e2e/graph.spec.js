@@ -2,32 +2,7 @@
 // constant DOM size, no rebuild on unchanged refreshes, and branches moving
 // while paging. Uses a synthetic repo built in a second with git fast-import
 // (the big-repo PERFORMANCE check is separate and manual).
-import { test, expect, git, write } from './fixtures.js';
-import { execFileSync } from 'node:child_process';
-import fs from 'node:fs';
-import path from 'node:path';
-
-const COMMITS = 900;
-const BRANCH_EVERY = 45; // → 20 branches spread along history
-
-function syntheticRepo(root) {
-  const dir = path.join(root, 'big');
-  fs.mkdirSync(dir, { recursive: true });
-  git(dir, 'init', '-q', '-b', 'main');
-  let stream = '';
-  for (let i = 1; i <= COMMITS; i++) {
-    const ts = 1_600_000_000 + i * 60; // strictly increasing dates: deterministic order
-    const content = `line ${i}\n`;
-    stream += `commit refs/heads/main\nmark :${i}\ncommitter t <t@t> ${ts} +0000\ndata ${`c${i}`.length}\nc${i}\n`;
-    if (i > 1) stream += `from :${i - 1}\n`;
-    stream += `M 100644 inline f.txt\ndata ${Buffer.byteLength(content)}\n${content}\n`;
-    if (i % BRANCH_EVERY === 0) stream += `reset refs/heads/b${i}\nfrom :${i}\n\n`;
-    if (i % 300 === 0) stream += `reset refs/tags/v${i / 300}\nfrom :${i}\n\n`;
-  }
-  execFileSync('git', ['fast-import', '--quiet'], { cwd: dir, input: stream });
-  git(dir, 'checkout', '-q', '-f', 'main');
-  return dir;
-}
+import { test, expect, git, write, syntheticRepo } from './fixtures.js';
 
 const footer = (page) => page.locator('#graph-footer');
 const loadMore = async (page) => {
@@ -38,7 +13,7 @@ const loadMore = async (page) => {
 };
 
 test('graph: paged, virtualized, and stable across refreshes and moving branches', async ({ app, repos, page }) => {
-  const R = syntheticRepo(repos.root);
+  const R = syntheticRepo(repos.root, { commits: 900, branchEvery: 45 });
   const total = Number(git(R, 'rev-list', '--count', '--branches', 'HEAD'));
   await app.boot(R);
 

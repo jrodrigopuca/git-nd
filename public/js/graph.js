@@ -67,6 +67,11 @@ export class GraphView {
     this.waiting = new Map();   // parent oid not loaded yet → [child oid]
     this.drawnRows = new Map(); // row index → <g>
     this.drawnEdges = new Map(); // key → <path>
+    // Roving tabindex (BACKLOG B-24): the whole graph is ONE tab stop — the
+    // active row has tabindex 0, every other row -1 — and ↑/↓ move between
+    // rows, scrolling the virtual list. Tabbing through thousands of rows
+    // would make the rest of the page unreachable.
+    this.activeRow = 0;
 
     this.svg = svgEl('svg', {});
     this.edgesLayer = svgEl('g', {});
@@ -101,10 +106,37 @@ export class GraphView {
     this.tagTips = {};
     for (const [oid, names] of Object.entries(tags)) this.tagTips[oid] = names.map((name) => ({ name, tag: true }));
     for (const [i, g] of this.drawnRows) {
+      const hadFocus = g === document.activeElement;
       const fresh = this.drawRow(i);
       g.replaceWith(fresh);
       this.drawnRows.set(i, fresh); // keep the registry pointing at what is in the DOM
+      if (hadFocus) fresh.focus({ preventScroll: true });
     }
+  }
+
+  /** Keyboard: make row `i` the active one, bring it into view, draw it, focus it. */
+  focusRow(i) {
+    const n = this.commits.length;
+    if (!n) return;
+    i = Math.max(0, Math.min(n - 1, i));
+    this.setActiveRow(i);
+    const sc = this.scroller;
+    if (sc) {
+      const svgTop = this.svg.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+      const top = svgTop + 4 + i * ROW_H;
+      const bottom = svgTop + 32 + i * ROW_H;
+      if (top < sc.scrollTop) sc.scrollTop = top;
+      else if (bottom > sc.scrollTop + sc.clientHeight) sc.scrollTop = bottom - sc.clientHeight;
+    }
+    this.update(); // synchronously: the row must exist before it can take focus
+    this.drawnRows.get(i)?.focus({ preventScroll: true });
+  }
+
+  setActiveRow(i) {
+    if (i === this.activeRow) return;
+    this.drawnRows.get(this.activeRow)?.setAttribute('tabindex', '-1');
+    this.activeRow = i;
+    this.drawnRows.get(i)?.setAttribute('tabindex', '0');
   }
 
   /** Stop listening (the view is being replaced). */
@@ -209,13 +241,29 @@ export class GraphView {
     return [first, last];
   }
 
+  /** Index of the first row actually on screen (no overscan). */
+  firstVisibleRow() {
+    const sc = this.scroller;
+    if (!sc || !sc.clientHeight || !this.svg.isConnected) return 0;
+    const svgTop = this.svg.getBoundingClientRect().top - sc.getBoundingClientRect().top + sc.scrollTop;
+    return Math.max(0, Math.ceil((sc.scrollTop - svgTop - 4) / ROW_H));
+  }
+
   /** Bring the DOM in line with the visible range: add what entered, drop what left. */
   update() {
     if (!this.commits.length) return;
     const [first, last] = this.visibleRange();
 
+    const focusedInGraph = this.svg.contains(document.activeElement);
     for (const [i, g] of this.drawnRows) {
-      if (i < first || i > last) { g.remove(); this.drawnRows.delete(i); }
+      // Never drop the row holding keyboard focus: focus would fall to <body>.
+      if ((i < first || i > last) && g !== document.activeElement) { g.remove(); this.drawnRows.delete(i); }
+    }
+    // The single tab stop must exist: if the active row scrolled away (and
+    // focus is not in the graph), the first row on screen becomes active.
+    if (!focusedInGraph && (this.activeRow < first || this.activeRow > last)) {
+      this.activeRow = Math.min(last, Math.max(first, this.firstVisibleRow()));
+      for (const [i, g] of this.drawnRows) g.setAttribute('tabindex', i === this.activeRow ? '0' : '-1');
     }
     for (let i = first; i <= last; i++) {
       if (!this.drawnRows.has(i)) {
@@ -374,7 +422,21 @@ export class GraphView {
     const meta = svgEl('text', { x: width - 10, y: cy + 4, 'text-anchor': 'end', class: 'graph-meta' });
     meta.textContent = `${c.oid.slice(0, 7)} · ${new Date(c.date).toLocaleDateString()}`;
     g.append(msg, meta);
-    if (this.onSelect) g.addEventListener('click', () => this.onSelect(c));
+    if (this.onSelect) g.addEventListener('click', () => { this.setActiveRow(i); this.onSelect(c); });
+    // Keyboard (BACKLOG B-24): one tab stop (roving tabindex), ↑/↓ to move,
+    // Enter/Space to open the commit.
+    g.setAttribute('tabindex', i === this.activeRow ? '0' : '-1');
+    g.setAttribute('role', 'button');
+    g.setAttribute('aria-label', `${firstLine} — ${c.oid.slice(0, 7)} by ${c.author}`);
+    g.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        this.focusRow(i + (e.key === 'ArrowDown' ? 1 : -1));
+      } else if ((e.key === 'Enter' || e.key === ' ') && this.onSelect) {
+        e.preventDefault();
+        this.onSelect(c);
+      }
+    });
     return g;
   }
 }

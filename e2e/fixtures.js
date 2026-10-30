@@ -32,6 +32,30 @@ export function write(dir, p, content) {
 
 export const read = (dir, p) => fs.readFileSync(path.join(dir, p), 'utf8');
 
+/**
+ * A repo with `commits` linear commits ("c1"…"cN", strictly increasing dates,
+ * so the graph order is deterministic), a branch every `branchEvery` commits
+ * and a tag every 300 — built in a second with git fast-import.
+ */
+export function syntheticRepo(root, { commits = 900, branchEvery = 45, name = 'big' } = {}) {
+  const dir = path.join(root, name);
+  fs.mkdirSync(dir, { recursive: true });
+  git(dir, 'init', '-q', '-b', 'main');
+  let stream = '';
+  for (let i = 1; i <= commits; i++) {
+    const ts = 1_600_000_000 + i * 60;
+    const content = `line ${i}\n`;
+    stream += `commit refs/heads/main\nmark :${i}\ncommitter t <t@t> ${ts} +0000\ndata ${`c${i}`.length}\nc${i}\n`;
+    if (i > 1) stream += `from :${i - 1}\n`;
+    stream += `M 100644 inline f.txt\ndata ${Buffer.byteLength(content)}\n${content}\n`;
+    if (i % branchEvery === 0) stream += `reset refs/heads/b${i}\nfrom :${i}\n\n`;
+    if (i % 300 === 0) stream += `reset refs/tags/v${i / 300}\nfrom :${i}\n\n`;
+  }
+  execFileSync('git', ['fast-import', '--quiet'], { cwd: dir, input: stream });
+  git(dir, 'checkout', '-q', '-f', 'main');
+  return dir;
+}
+
 /** Repo-local git identity, like a user who has git configured: the commit box gets an author. */
 export function identity(dir) {
   git(dir, 'config', 'user.name', 'E2E User');

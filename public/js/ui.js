@@ -1,3 +1,21 @@
+const NATIVELY_INTERACTIVE = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA', 'SUMMARY', 'OPTION', 'LABEL']);
+
+/**
+ * Make a clickable non-control (li, div, span, svg g…) usable with the
+ * keyboard: focusable, announced as a button, activated by Enter or Space
+ * (BACKLOG B-24). The key only counts when focus is ON this element, so a
+ * button nested inside does its own thing without also firing the row.
+ */
+export function makeActivatable(node) {
+  if (!node.hasAttribute('tabindex')) node.setAttribute('tabindex', '0');
+  if (!node.hasAttribute('role')) node.setAttribute('role', 'button');
+  node.addEventListener('keydown', (e) => {
+    if (e.target !== node || (e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault(); // Space would scroll the page
+    node.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+}
+
 /** DOM helper: el('div', {class: 'x', onclick: fn}, child1, 'text', …) */
 export function el(tag, attrs = {}, ...children) {
   const node = document.createElement(tag);
@@ -7,6 +25,8 @@ export function el(tag, attrs = {}, ...children) {
     else if (key === 'dataset') Object.assign(node.dataset, value);
     else if (value !== false && value != null) node.setAttribute(key, value === true ? '' : value);
   }
+  // Anything clickable must be keyboard-operable too, not only real controls.
+  if (attrs.onclick && !NATIVELY_INTERACTIVE.has(node.tagName)) makeActivatable(node);
   for (const child of children.flat()) {
     if (child == null || child === false) continue; // allow `cond && el(…)` patterns
     node.append(child.nodeType ? child : document.createTextNode(child));

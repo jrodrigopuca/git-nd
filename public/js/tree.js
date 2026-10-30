@@ -1,5 +1,5 @@
 import { api, withUi } from './api.js';
-import { el, fileIcon, toast } from './ui.js';
+import { el, fileIcon, toast, makeActivatable } from './ui.js';
 
 const container = () => document.getElementById('tree');
 const expanded = new Set();
@@ -45,16 +45,23 @@ function renderNode(entry) {
   // children shown), and the next click appended a second set (BACKLOG B-15).
   let seq = 0;
   const twisty = () => row.querySelector('.twisty');
+  // Keyboard: rows are focusable and open/toggle with Enter or Space (BACKLOG
+  // B-24); folders announce whether they are expanded.
+  makeActivatable(row);
+  row.setAttribute('aria-label', `${entry.type === 'dir' ? 'Folder' : 'File'} ${entry.path}`);
+  if (entry.type === 'dir') row.setAttribute('aria-expanded', String(expanded.has(entry.path)));
   const collapse = () => {
     seq++;
     expanded.delete(entry.path);
     node.querySelector('.tree-children')?.remove();
     twisty().textContent = '▶';
+    row.setAttribute('aria-expanded', 'false');
   };
   const expand = async () => {
     const mine = ++seq;
     expanded.add(entry.path);
     twisty().textContent = '▼';
+    row.setAttribute('aria-expanded', 'true');
     let children;
     try {
       children = await renderLevel(entry.path);
