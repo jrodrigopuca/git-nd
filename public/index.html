@@ -12,31 +12,32 @@
     <div class="brand"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-leaf-brand"/></svg><strong>git-nd</strong></div>
     <div class="repo-chip" id="repo-chip" hidden>
       <button class="btn btn-ghost" id="repo-name" title="Switch repository (Explorer)"></button>
-      <button class="btn btn-ghost" id="btn-branch" title="Switch branch">⎇ <span id="branch-name"></span></button>
+      <button class="btn btn-ghost" id="btn-branch" title="Switch branch"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-git-branch"/></svg><span id="branch-name"></span></button>
     </div>
     <div class="spacer"></div>
-    <button class="btn" id="btn-clone">⬇ Clone</button>
-    <button class="btn btn-ghost" id="btn-fetch" title="Fetch: check the remote for incoming changes">↻ Fetch</button>
-    <button class="btn" id="btn-pull" title="Pull">⇣ Pull<span class="count-badge" id="behind-badge" hidden></span></button>
-    <button class="btn btn-ghost" id="btn-pull-mode" title="Pull mode (merge / rebase)">▾</button>
-    <button class="btn" id="btn-push" title="Push (Ctrl+Shift+P)">⇡ Push<span class="count-badge" id="ahead-badge" hidden></span></button>
+    <button class="btn" id="btn-clone"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-download"/></svg>Clone</button>
+    <button class="btn btn-ghost" id="btn-fetch" title="Fetch: check the remote for incoming changes"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-refresh-cw"/></svg>Fetch</button>
+    <button class="btn" id="btn-pull" title="Pull"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-arrow-down-to-line"/></svg><span id="pull-label">Pull</span><span class="count-badge" id="behind-badge" hidden></span></button>
+    <button class="btn btn-ghost btn-icon" id="btn-pull-mode" title="Pull mode (merge / rebase)" aria-label="Pull mode (merge / rebase)"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-chevron-down"/></svg></button>
+    <button class="btn" id="btn-push" title="Push (Ctrl+Shift+P)"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-arrow-up-from-line"/></svg>Push<span class="count-badge" id="ahead-badge" hidden></span></button>
     <!-- Narrow windows only (≤980px): opens the right panel as a drawer (visual review V-E). -->
-    <button class="btn" id="btn-panel" aria-controls="rightbar" aria-expanded="false" title="Changes and commit">✎ Changes<span class="count-badge" id="panel-badge" hidden></span></button>
-    <button class="btn btn-ghost" id="btn-theme" title="Light/dark mode">🌙</button>
-    <button class="btn btn-ghost" id="btn-auth" title="Connections">👤 Connect</button>
+    <button class="btn" id="btn-panel" aria-controls="rightbar" aria-expanded="false" title="Changes and commit"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-pencil"/></svg>Changes<span class="count-badge" id="panel-badge" hidden></span></button>
+    <!-- Icon and label are set from the saved theme before first paint (app.js). -->
+    <button class="btn btn-ghost btn-icon" id="btn-theme" title="Switch to light theme" aria-label="Switch to light theme"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-moon"/></svg></button>
+    <button class="btn btn-ghost" id="btn-auth" title="Connections"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-circle-user-round"/></svg><span id="auth-label">Connect</span></button>
   </header>
 
   <div class="app">
-    <nav class="activity-bar">
-      <button class="act-btn" data-view="explorer" title="Explorer — browse folders & repositories">🗂️</button>
-      <button class="act-btn active" data-view="repo" title="Repository — working copy, history, branches">📗</button>
-      <button class="act-btn" data-view="connections" title="Connections — GitHub / GitLab accounts">🔌</button>
+    <nav class="activity-bar" aria-label="Views">
+      <button class="act-btn" data-view="explorer" title="Explorer — browse folders &amp; repositories" aria-label="Explorer"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-folder-search"/></svg></button>
+      <button class="act-btn active" data-view="repo" title="Repository — working copy, history, branches" aria-label="Repository" aria-current="page"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-git-graph"/></svg></button>
+      <button class="act-btn" data-view="connections" title="Connections — GitHub / GitLab accounts" aria-label="Connections"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-plug"/></svg></button>
     </nav>
 
     <!-- ============================== EXPLORER ============================== -->
     <section class="view" id="view-explorer">
       <div class="page">
-        <h1>🗂️ Explorer</h1>
+        <h1>Explorer</h1>
         <div class="page-cols">
           <div>
             <h3>Recent repositories</h3>
@@ -44,7 +45,7 @@
 
             <h3>Browse folders</h3>
             <div class="row" style="margin-bottom:8px">
-              <button class="btn btn-xs" id="ex-up" title="Up one level">↑</button>
+              <button class="btn btn-xs btn-icon" id="ex-up" title="Up one level" aria-label="Up one level"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-corner-left-up"/></svg></button>
               <input type="text" id="ex-path" placeholder="/path/to/browse" />
             </div>
             <div id="ex-open-here"></div>
@@ -67,7 +68,7 @@
           <div class="panel-title">
             <span class="files-title">Files</span>
             <span class="panel-title-actions">
-              <button class="btn btn-ghost btn-xs" id="btn-refresh-tree" title="Refresh" aria-label="Refresh files">↻</button>
+              <button class="btn btn-ghost btn-xs btn-icon" id="btn-refresh-tree" title="Refresh" aria-label="Refresh files"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-refresh-cw"/></svg></button>
               <button class="btn btn-ghost btn-xs btn-icon" id="btn-files-toggle" aria-controls="sidebar" aria-expanded="true" aria-label="Hide files" title="Hide files">
                 <svg class="icon i-collapse" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-panel-left-close"/></svg>
                 <svg class="icon i-expand" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-panel-left-open"/></svg>
@@ -76,14 +77,14 @@
           </div>
           <div class="files-rail-label" id="files-rail-label" aria-hidden="true">Files</div>
           <div class="tree" id="tree" tabindex="0">
-            <p class="muted pad">No repository open. Pick one in the 🗂️ Explorer view.</p>
+            <p class="muted pad">No repository open. Pick one in the Explorer view.</p>
           </div>
         </aside>
 
         <main class="center">
           <nav class="tabs" id="tabs">
             <button class="tab active" data-tab="graph">Graph</button>
-            <button class="tab" data-tab="merge" id="tab-btn-merge" hidden>⚡ Merge</button>
+            <button class="tab" data-tab="merge" id="tab-btn-merge" hidden><svg class="icon icon-sm" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-git-merge"/></svg> Merge</button>
             <button class="tab" data-tab="file" hidden>File</button>
             <button class="tab" data-tab="diff" hidden>Diff</button>
             <button class="tab" data-tab="conflict" hidden>Conflict</button>
@@ -102,8 +103,8 @@
               <span id="file-path"></span>
               <div class="conflict-actions">
                 <span class="muted" id="file-dirty"></span>
-                <button class="btn btn-xs btn-primary" id="btn-save-file">💾 Save</button>
-                <button class="btn btn-xs" id="btn-close-file" title="Close file">✕ Close</button>
+                <button class="btn btn-xs btn-primary" id="btn-save-file">Save</button>
+                <button class="btn btn-xs" id="btn-close-file" title="Close file"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-x"/></svg>Close</button>
               </div>
             </div>
             <textarea class="conflict-editor" id="file-editor" spellcheck="false"></textarea>
@@ -113,7 +114,7 @@
             <div class="file-head">
               <span id="diff-path"></span>
               <div class="conflict-actions">
-                <button class="btn btn-xs" id="btn-close-diff" title="Close diff">✕ Close</button>
+                <button class="btn btn-xs" id="btn-close-diff" title="Close diff"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-x"/></svg>Close</button>
               </div>
             </div>
             <div class="diff-view" id="diff-view"></div>
@@ -124,8 +125,8 @@
               <span id="conflict-path"></span>
               <div class="conflict-actions">
                 <span class="muted" id="c-progress"></span>
-                <button class="btn btn-xs" id="c-text" title="Toggle raw text editing">✏️ Text mode</button>
-                <button class="btn btn-xs btn-primary" id="c-save" disabled>💾 Save & mark resolved</button>
+                <button class="btn btn-xs" id="c-text" title="Toggle raw text editing"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-pencil"/></svg>Text mode</button>
+                <button class="btn btn-xs btn-primary" id="c-save" disabled>Save &amp; mark resolved</button>
               </div>
             </div>
             <div class="cf-wrap" id="conflict-visual"></div>
@@ -136,11 +137,11 @@
         <aside class="rightbar" id="rightbar" aria-label="Changes and commit">
           <div class="drawer-head">
             <strong>Changes &amp; commit</strong>
-            <button class="btn btn-ghost btn-xs" id="btn-panel-close" aria-label="Close panel" title="Close (Esc)">✕</button>
+            <button class="btn btn-ghost btn-xs" id="btn-panel-close" aria-label="Close panel" title="Close (Esc)"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-x"/></svg></button>
           </div>
           <div class="merge-banner" id="merge-banner" hidden>
-            <strong>⚠ Merge in progress</strong>
-            <button class="btn btn-xs" id="btn-merge-view">⚡ Open merge view</button>
+            <strong><svg class="icon bad" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-triangle-alert"/></svg> Merge in progress</strong>
+            <button class="btn btn-xs" id="btn-merge-view"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-git-merge"/></svg>Open merge view</button>
           </div>
 
           <details open class="section">
@@ -152,7 +153,7 @@
                 <button class="btn btn-ghost btn-xs" id="btn-unstage-all" title="Unstage all">Unstage all</button>
               </div>
               <ul class="file-list" id="staged-list"></ul>
-              <p class="empty-hint" id="staged-empty">Nothing staged. Stage files with ＋, or Stage all.</p>
+              <p class="empty-hint" id="staged-empty">Nothing staged. Stage files with the + button, or Stage all.</p>
             </div>
             <div class="subsection-title"><span>Unstaged · <span id="unstaged-count">0</span></span>
               <button class="btn btn-ghost btn-xs" id="btn-stage-all" title="Stage all">Stage all</button>
@@ -169,7 +170,7 @@
               <label class="row" style="font-size:11.5px;color:var(--muted);cursor:pointer">
                 <input type="checkbox" id="amend-check" style="width:auto" /> Amend last commit
               </label>
-              <button class="btn btn-primary" id="btn-commit" aria-describedby="commit-reason">✔ Commit</button>
+              <button class="btn btn-primary" id="btn-commit" aria-describedby="commit-reason">Commit</button>
               <span class="commit-reason" id="commit-reason" aria-live="polite"></span>
             </div>
           </details>
@@ -178,7 +179,7 @@
             <summary>Branches</summary>
             <div class="row pad-h">
               <input type="text" id="new-branch" placeholder="new-branch" />
-              <button class="btn btn-xs" id="btn-new-branch">＋</button>
+              <button class="btn btn-xs btn-icon" id="btn-new-branch" title="Create branch" aria-label="Create branch"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-plus"/></svg></button>
             </div>
             <ul class="branch-list" id="branch-list"></ul>
           </details>
@@ -201,9 +202,9 @@
           <details class="section">
             <summary>Pull Request / Issues</summary>
             <div class="pad-h col">
-              <button class="btn" id="btn-list-prs">⇄ Open PRs / MRs</button>
-              <button class="btn" id="btn-create-pr">＋ Create Pull Request</button>
-              <button class="btn" id="btn-issues">🐛 View issues</button>
+              <button class="btn" id="btn-list-prs"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-git-pull-request"/></svg>Open PRs / MRs</button>
+              <button class="btn" id="btn-create-pr"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-plus"/></svg>Create Pull Request</button>
+              <button class="btn" id="btn-issues"><svg class="icon" aria-hidden="true" focusable="false"><use href="/icons/sprite.svg#i-circle-dot"/></svg>View issues</button>
             </div>
           </details>
         </aside>
@@ -213,7 +214,7 @@
     <!-- ============================== CONNECTIONS =========================== -->
     <section class="view" id="view-connections">
       <div class="page">
-        <h1>🔌 Connections</h1>
+        <h1>Connections</h1>
         <p class="muted">Tokens are stored encrypted (AES-256-GCM) in <code>~/.git-nd/tokens.enc</code> — never in the browser. They survive restarts.</p>
         <div class="conn-cards" id="conn-cards"></div>
       </div>

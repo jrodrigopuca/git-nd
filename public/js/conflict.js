@@ -1,4 +1,4 @@
-import { el } from './ui.js';
+import { el, icon } from './ui.js';
 
 /**
  * Visual merge-conflict editor.
@@ -98,12 +98,12 @@ function conflictNode(seg, index, total, names, onChange) {
     [el('button', { class: 'btn btn-xs', onclick: pick('ours') }, '← Keep local'), 'ours'],
     [el('button', { class: 'btn btn-xs', onclick: pick('theirs') }, 'Take incoming →'), 'theirs'],
     [el('button', { class: 'btn btn-xs', onclick: pick('both') }, '⇵ Both'), 'both'],
-    [el('button', { class: 'btn btn-xs', onclick: pick('custom') }, '✏️ Edit'), 'custom'],
+    [el('button', { class: 'btn btn-xs', onclick: pick('custom') }, icon('pencil'), 'Edit'), 'custom'],
   ];
 
   block.append(
     el('div', { class: 'cf-block-head' },
-      el('strong', {}, `⚡ Conflict ${index + 1} of ${total}`),
+      el('strong', {}, icon('triangle-alert', { className: 'bad' }), ` Conflict ${index + 1} of ${total}`),
       el('span', { class: 'spacer' }),
       ...buttons.map(([b]) => b),
     ),

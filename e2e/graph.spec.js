@@ -25,7 +25,10 @@ test('graph: paged, virtualized, and stable across refreshes and moving branches
 
   // Tags arrive after the first page and are drawn where they are.
   await page.locator('#graph-wrap').evaluate((w) => { w.scrollTop = 10 + 300 * 28 - 200; });
-  await expect(page.locator('#graph-wrap text', { hasText: '🏷 v2' })).toBeVisible();
+  // A tag chip: its name, plus the tag icon from the sprite (it was a 🏷 in the text).
+  const tagChip = page.locator('#graph-wrap g[data-ref="tag"]', { has: page.locator('text', { hasText: /^v2$/ }) });
+  await expect(tagChip).toBeVisible();
+  await expect(tagChip.locator('use')).toHaveAttribute('href', '/icons/sprite.svg#i-tag');
 
   // A watcher refresh with unchanged refs must not rebuild the graph.
   const svg = await page.locator('#graph-wrap svg').elementHandle();

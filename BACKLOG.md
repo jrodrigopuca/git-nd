@@ -485,7 +485,7 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
   - Sin atajo Ctrl/Cmd+B por ahora: pisa los marcadores de Firefox.
   - Test: `e2e/files-collapse.spec.js`, 5 tests. Con el código anterior fallan los 5.
 
-### R2-3 `[~]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
+### R2-3 `[x]` 🟡 Emojis → íconos SVG (Lucide ISC + Simple Icons CC0, sprite local)
 - **Base hecha:**
   - `public/icons/sprite.svg`: 63 símbolos sin modificar, más la hoja, con sus licencias en `public/icons/LICENSE`.
   - Helper `icon(name, { label })` en `ui.js`, decorativo (`aria-hidden`) por defecto.
@@ -493,7 +493,20 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
 - **Tests:**
   - `test/icons.test.js`: el sprite no tiene ids internos, máscaras ni colores fijos; todo ícono referenciado existe; la licencia está; la marca y el favicon son correctos.
   - `e2e/icons.spec.js`: la marca se pinta con `--brand` en los dos temas y no hay requests a otro origen.
-- **Falta:** reemplazar los emojis por zona: topbar y activity bar → árbol y `fileIcon` → paneles, modales y toasts → grafo, actualizando los 3 E2E que buscan 🏷/▶/⚠. Al final, un test que no encuentre ningún `\p{Extended_Pictographic}` en `public/`.
+- **Reemplazo hecho (`[x]`):** se fueron los 49 emojis (120 usos) y los símbolos de texto que hacían de ícono (⎇ ↻ ⇣ ⇡ ▾ ✎ ✕ ＋ ⇄ ⇲ ⇱ ▶ ▼ ✓).
+  - **Botones primarios con texto** (Commit, Save, Complete merge): ahora van sin ícono.
+  - **Toasts:** el tipo se ve como ícono (`circle-check` / `triangle-alert`), sin "✔" en el texto.
+  - **`fileIcon`:** glifos por categoría en `--muted`, en lugar de logos de lenguaje.
+  - **Árbol:** un chevron que gira con CSS según `aria-expanded`, y la carpeta se ve abierta o cerrada.
+  - **Barra de vistas:** `aria-label`, `aria-current="page"` y una barra `--accent-solid` en la vista actual (antes era `opacity` más un anillo).
+  - **Grafo:** el tag lleva el ícono del sprite dentro del chip, con `data-ref="tag"`.
+  - **Botones solo-ícono:** todos con `aria-label`; los de ramas nombran la rama.
+  - **Botón del tema:** su ícono y su label salen del tema guardado desde la carga. Antes mostraba 🌙 aunque el tema guardado fuera el claro.
+  - **Tests:**
+    - `test/icons.test.js`: no queda ningún emoji ni símbolo-ícono en el código de `public/`.
+    - `e2e/icons.spec.js`: nombres accesibles en las 3 vistas, `aria-current`, botón del tema y toasts.
+    - Se actualizaron `graph`, `races` y `clone`, que buscaban 🏷, ▶ y ⚠.
+  - **Verificación visual:** capturas de las 3 vistas en los dos temas a 1440, 1180 y 900 px. Encontré y corregí un caso de ícono pegado al texto: `:only-child` ignora los nodos de texto.
 ### R2-4 `[x]` 🟠 `tree.js` detecta carpetas leyendo el texto del twisty
 - Con un twisty SVG, todo drop iría a la carpeta padre.
 - **Cerrado:** el `.tree-node` lleva `data-type` y el drop decide con ese dato.

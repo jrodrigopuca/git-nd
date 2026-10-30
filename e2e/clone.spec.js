@@ -22,7 +22,9 @@ test('clone preview: default, relative and non-empty destinations', async ({ app
   const notEmpty = path.join(repos.root, 'not-empty');
   write(notEmpty, 'keep.txt', 'mine\n');
   await target.fill(notEmpty);
-  await expect(preview).toHaveText(new RegExp(`^⚠ ${notEmpty.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} already exists`));
+  // Warning icon (svg) + the text; the text no longer carries a ⚠.
+  await expect(preview).toHaveText(new RegExp(`^\\s*${notEmpty.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} already exists`));
+  await expect(preview.locator('svg.icon use')).toHaveAttribute('href', '/icons/sprite.svg#i-triangle-alert');
   await expect(cloneBtn).toBeDisabled();
 });
 

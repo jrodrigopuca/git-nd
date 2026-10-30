@@ -1,5 +1,5 @@
 import { api, withUi, onEvent } from './api.js';
-import { el, toast, openModal, closeModal, confirmModal, fileIcon, setChildren, makeActivatable, friendlyDate, fullDate } from './ui.js';
+import { el, icon, toast, openModal, closeModal, confirmModal, fileIcon, setChildren, makeActivatable, friendlyDate, fullDate } from './ui.js';
 import { refreshTree, setStatusMap, setOpenFileHandler, initTreeDnD } from './tree.js';
 import { renderDiff } from './diff.js';
 import { GraphView } from './graph.js';
@@ -12,7 +12,11 @@ let authStatus = null; // provider connection status
 /* ================================================================ views === */
 
 function switchView(name) {
-  document.querySelectorAll('.act-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('.act-btn').forEach((b) => {
+    const current = b.dataset.view === name;
+    b.classList.toggle('active', current);
+    if (current) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${name}`));
   if (name === 'explorer') renderExplorer();
   if (name === 'connections') renderConnections();
@@ -88,7 +92,7 @@ let browsePath = null;
 function renderExplorer() {
   $('ex-recents').replaceChildren(
     ...getRecents().map((dir) =>
-      el('li', { onclick: () => openRepo(dir) }, '🌿', dir)),
+      el('li', { onclick: () => openRepo(dir) }, icon('folder-git-2'), dir)),
   );
   if (getRecents().length === 0) {
     $('ex-recents').replaceChildren(el('li', { class: 'muted', style: 'cursor:default' }, 'Nothing yet — open a repo below.'));
@@ -109,12 +113,12 @@ async function browseTo(path) {
   $('ex-open-here').replaceChildren(
     data.isRepo
       ? el('button', { class: 'btn btn-primary', style: 'margin-bottom:8px', onclick: () => openRepo(data.path) },
-          `🌿 Open this repository (${data.path.split('/').pop()})`)
+          `Open this repository (${data.path.split('/').pop()})`)
       : '',
   );
   $('ex-dirs').replaceChildren(...data.entries.map((e) =>
     el('li', { onclick: () => (e.isRepo ? openRepo(e.path) : browseTo(e.path)) },
-      e.isRepo ? '🌿' : '📁', e.name,
+      icon(e.isRepo ? 'folder-git-2' : 'folder'), e.name,
       el('span', { class: 'muted-right' }, e.isRepo ? 'git repository — click to open' : ''),
     )));
   if (data.entries.length === 0) {
@@ -151,7 +155,7 @@ async function renderExplorerRemote() {
       .filter((r) => r.fullName.toLowerCase().includes(q))
       .slice(0, 40)
       .map((r) => el('li', { onclick: () => cloneModal(r.cloneUrl) },
-        r.private ? '🔒' : '📖', r.fullName,
+        r.private ? icon('lock', { label: 'Private' }) : null, r.fullName,
         el('span', { class: 'muted-right' }, 'clone'),
       )));
   };
@@ -171,18 +175,18 @@ async function renderConnections() {
         api.post('/api/auth/token', { provider: p.name, token: patInput.value.trim() }),
         { loading: 'Validating token…' },
       );
-      if (r) { toast(`Connected to ${p.name} as ${r.user.login} ✔`, 'success'); renderConnections(); }
+      if (r) { toast(`Connected to ${p.name} as ${r.user.login}`, 'success'); renderConnections(); }
     };
     patInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') connectWithPat(); });
 
     return el('div', { class: 'conn-card' },
-      el('h2', {}, p.name === 'github' ? '🐙 GitHub' : '🦊 GitLab'),
+      el('h2', {}, icon(p.name === 'github' ? 'github' : 'gitlab'), p.name === 'github' ? ' GitHub' : ' GitLab'),
       p.connected
         ? el('div', { class: 'col' },
             el('div', { class: 'row' },
               p.user?.avatar ? el('img', { class: 'avatar', src: p.user.avatar, alt: '' }) : null,
               el('div', {},
-                el('div', {}, `${p.user?.name || p.user?.login} ✔`),
+                el('div', {}, `${p.user?.name || p.user?.login} `, icon('circle-check', { label: 'Connected', className: 'ok' })),
                 el('div', { class: 'muted', style: 'font-size:11.5px' }, p.user?.email || p.user?.login)),
             ),
             el('div', { class: 'row' },
@@ -213,9 +217,9 @@ async function renderConnections() {
 
 function updateAuthButton() {
   const connected = authStatus?.providers.filter((p) => p.connected) || [];
-  $('btn-auth').textContent = connected.length
-    ? `👤 ${connected.map((p) => p.user?.login || p.name).join(', ')}`
-    : '👤 Connect';
+  $('auth-label').textContent = connected.length
+    ? connected.map((p) => p.user?.login || p.name).join(', ')
+    : 'Connect';
 }
 $('btn-auth').addEventListener('click', () => switchView('connections'));
 
@@ -274,7 +278,7 @@ async function refreshAll({ loading = false } = {}) {
   repo = info;
 
   $('repo-chip').hidden = false;
-  $('repo-name').textContent = `📂 ${info.name}`;
+  $('repo-name').replaceChildren(icon('folder-git-2'), info.name);
   // Full path on hover: after a clone or open, "where is this repo?" is one hover away.
   $('repo-name').title = `${info.dir}\nClick to switch repository (Explorer)`;
   $('branch-name').textContent = info.branch;
@@ -322,16 +326,16 @@ function renderChanges(status) {
       }, f.filepath),
       el('span', { class: 'actions' },
         isStaged
-          ? el('button', { class: 'btn btn-ghost btn-xs', title: 'Unstage', 'aria-label': `Unstage ${f.filepath}`, onclick: () => act('unstage', f.filepath) }, '−')
-          : el('button', { class: 'btn btn-ghost btn-xs', title: 'Stage', 'aria-label': `Stage ${f.filepath}`, onclick: () => act('stage', f.filepath) }, '＋'),
+          ? el('button', { class: 'btn btn-ghost btn-xs btn-icon', title: 'Unstage', 'aria-label': `Unstage ${f.filepath}`, onclick: () => act('unstage', f.filepath) }, icon('minus'))
+          : el('button', { class: 'btn btn-ghost btn-xs btn-icon', title: 'Stage', 'aria-label': `Stage ${f.filepath}`, onclick: () => act('stage', f.filepath) }, icon('plus')),
         !isStaged && el('button', {
-          class: 'btn btn-ghost btn-xs', title: 'Discard changes', 'aria-label': `Discard changes to ${f.filepath}`,
+          class: 'btn btn-ghost btn-xs btn-icon', title: 'Discard changes', 'aria-label': `Discard changes to ${f.filepath}`,
           onclick: async () => {
             if (await confirmModal('Discard changes', `Local changes to ${f.filepath} will be lost. Are you sure?`)) {
               act('discard', f.filepath);
             }
           },
-        }, '↺'),
+        }, icon('undo-2')),
       ),
     );
   };
@@ -354,9 +358,9 @@ async function loadAuthor() {
     const a = await api.get('/api/repo/author');
     if (a.name) $('commit-author').value = `${a.name} <${a.email}>`;
     const labels = {
-      repo: '· ✓ this repo\'s identity',
-      github: '· 🐙 from your GitHub account',
-      gitlab: '· 🦊 from your GitLab account',
+      repo: '· this repo\'s identity',
+      github: '· from your GitHub account',
+      gitlab: '· from your GitLab account',
       default: '· app default',
       none: '',
     };
@@ -367,7 +371,7 @@ async function loadAuthor() {
   } catch { /* no repo */ }
 }
 
-/* Author as a line ("Ana <ana@x.io> · ✓ this repo's identity · change"), not a
+/* Author as a line ("Ana <ana@x.io> · this repo's identity · change"), not a
    field that reads like a required first step (visual review V-B). The input
    stays in the DOM, revealed by "change". */
 function renderAuthorLine() {
@@ -401,7 +405,7 @@ async function doCommit() {
   const author = parseAuthor($('commit-author').value.trim());
   const result = await withUi(
     api.post(amend ? '/api/repo/amend' : '/api/repo/commit', { message, author }),
-    { loading: amend ? 'Amending…' : 'Committing…', success: amend ? 'Commit amended ✔' : 'Commit created ✔' },
+    { loading: amend ? 'Amending…' : 'Committing…', success: amend ? 'Commit amended' : 'Commit created' },
   );
   if (result) {
     $('commit-msg').value = '';
@@ -427,15 +431,16 @@ function updateCommitButton() {
   let label;
   let why = '';
   if ($('amend-check').checked) {
-    label = '✏️ Amend last commit'; // may change just the message: nothing staged is fine
+    // The primary button's text says what it does; no icon (proposal F4).
+    label = 'Amend last commit'; // may change just the message: nothing staged is fine
   } else if (merge) {
-    label = '✔ Complete merge';
+    label = 'Complete merge';
     if (pending) why = `Resolve ${pending} conflicted file${pending === 1 ? '' : 's'} first.`;
   } else if (!stagedCount) {
-    label = '✔ Commit';
+    label = 'Commit';
     why = 'Stage at least one file to commit.';
   } else {
-    label = `✔ Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${repo?.branch || 'HEAD'}`;
+    label = `Commit ${stagedCount} file${stagedCount === 1 ? '' : 's'} to ${repo?.branch || 'HEAD'}`;
   }
   btn.textContent = label;
   btn.disabled = Boolean(why);
@@ -455,7 +460,7 @@ $('amend-check').addEventListener('change', async () => {
 let pullMode = localStorage.getItem('gitnd-pull-mode') || 'merge';
 
 function applyPullModeUi() {
-  $('btn-pull').childNodes[0].textContent = pullMode === 'rebase' ? '⇣ Pull (rebase)' : '⇣ Pull';
+  $('pull-label').textContent = pullMode === 'rebase' ? 'Pull (rebase)' : 'Pull';
 }
 
 async function refreshSync(fetch) {
@@ -478,14 +483,14 @@ async function refreshSync(fetch) {
   badge('behind-badge', s.hasUpstream ? s.behind : 0);
   badge('ahead-badge', s.hasUpstream ? s.ahead : 0);
   if (fetch && s.hasUpstream) {
-    toast(s.behind ? `${s.behind} incoming commit(s) to pull ⇣` : 'Remote checked: already up to date ✔',
+    toast(s.behind ? `${s.behind} incoming commit(s) to pull` : 'Remote checked: already up to date',
       s.behind ? 'info' : 'success');
   }
   return s;
 }
 
 async function doPush() {
-  const r = await withUi(api.post('/api/repo/push'), { loading: 'Pushing…', success: 'Push completed ⇡' });
+  const r = await withUi(api.post('/api/repo/push'), { loading: 'Pushing…', success: 'Push completed' });
   if (r) refreshAll();
 }
 
@@ -501,11 +506,11 @@ async function doPull() {
     showTab('merge');
     return;
   } else if (r.upToDate) {
-    toast(r.note || 'Already up to date ✔', 'success');
+    toast(r.note || 'Already up to date', 'success');
   } else if (r.rebased) {
-    toast(r.fastForward ? 'Fast-forwarded to remote ✔' : `Rebased: ${r.replayed} commit(s) replayed on top ✔`, 'success');
+    toast(r.fastForward ? 'Fast-forwarded to remote' : `Rebased: ${r.replayed} commit(s) replayed on top`, 'success');
   } else {
-    toast('Pull completed ⇣', 'success');
+    toast('Pull completed', 'success');
   }
   refreshAll();
 }
@@ -521,14 +526,19 @@ $('btn-pull-mode').addEventListener('click', () => {
     applyPullModeUi();
     closeModal();
   };
+  // The current mode gets a check (named for screen readers); the other one
+  // keeps the same indent so the labels line up.
+  const mark = (mode) => (pullMode === mode
+    ? icon('check', { label: 'Current', className: 'ok' })
+    : el('span', { class: 'icon', 'aria-hidden': 'true' }));
   openModal(
     el('h2', {}, 'Pull mode'),
     el('ul', { class: 'list-pick' },
       el('li', { onclick: pick('merge') },
-        `${pullMode === 'merge' ? '✔' : '⇲'} Merge`,
+        mark('merge'), ' Merge',
         el('span', { class: 'muted', style: 'margin-left:auto' }, 'creates a merge commit when branches diverge')),
       el('li', { onclick: pick('rebase') },
-        `${pullMode === 'rebase' ? '✔' : '⇱'} Rebase`,
+        mark('rebase'), ' Rebase',
         el('span', { class: 'muted', style: 'margin-left:auto' }, 'replays your commits on top — linear history')),
     ),
   );
@@ -684,41 +694,41 @@ async function commitActions(c) {
             if (r) refreshAll();
           }
         },
-      }, '⏪ Hard reset…'),
+      }, icon('rotate-ccw'), 'Hard reset…'),
       el('button', {
         class: 'btn', title: 'Create a new commit that undoes this one — history is preserved',
         onclick: async () => {
           closeModal();
           const r = await withUi(
             api.post('/api/repo/revert', { oid: c.oid, author: parseAuthor($('commit-author').value.trim()) }),
-            { loading: 'Reverting…', success: `Revert commit created ✔` },
+            { loading: 'Reverting…', success: 'Revert commit created' },
           );
           if (r) refreshAll();
         },
-      }, '↩ Revert (safe)'),
+      }, icon('undo-2'), 'Revert (safe)'),
       el('button', {
         class: 'btn', title: 'Apply this commit on top of the current branch',
         onclick: async () => {
           closeModal();
           const r = await withUi(
             api.post('/api/repo/cherry-pick', { oid: c.oid, author: parseAuthor($('commit-author').value.trim()) }),
-            { loading: 'Cherry-picking…', success: 'Commit cherry-picked ✔' },
+            { loading: 'Cherry-picking…', success: 'Commit cherry-picked' },
           );
           if (r) refreshAll();
         },
-      }, '🍒 Cherry-pick'),
+      }, icon('cherry'), 'Cherry-pick'),
       el('button', {
         class: 'btn',
         onclick: () => {
           const name = el('input', { type: 'text', placeholder: 'v1.0.0' });
           const create = async () => {
             if (!name.value.trim()) return;
-            const r = await withUi(api.post('/api/repo/tag', { name: name.value.trim(), oid: c.oid }), { success: `Tag ${name.value} created 🏷` });
+            const r = await withUi(api.post('/api/repo/tag', { name: name.value.trim(), oid: c.oid }), { success: `Tag ${name.value} created` });
             if (r) { closeModal(); refreshAll(); }
           };
           name.addEventListener('keydown', (e) => { if (e.key === 'Enter') create(); });
           openModal(
-            el('h2', {}, `🏷 Tag commit ${c.oid.slice(0, 7)}`),
+            el('h2', {}, `Tag commit ${c.oid.slice(0, 7)}`),
             el('div', {}, el('label', {}, 'Tag name'), name),
             el('div', { class: 'modal-actions' },
               el('button', { class: 'btn', onclick: closeModal }, 'Cancel'),
@@ -726,7 +736,7 @@ async function commitActions(c) {
             ),
           );
         },
-      }, '🏷 Tag'),
+      }, icon('tag'), 'Tag'),
       el('button', { class: 'btn', onclick: closeModal }, 'Close'),
     ),
   );
@@ -736,31 +746,33 @@ async function commitActions(c) {
 
 function renderBranches(branches) {
   const li = (name, isCurrent, isRemote) => el('li', {},
-    el('span', { class: `bname ${isCurrent ? 'current' : ''}`, title: name }, `${isCurrent ? '✔ ' : ''}⎇ ${name}`), // full name when it is cut with …
+    // full name in the title when it is cut with …
+    el('span', { class: `bname ${isCurrent ? 'current' : ''}`, title: name },
+      isCurrent ? icon('check', { label: 'Current branch' }) : icon(isRemote ? 'cloud' : 'git-branch'), ` ${name}`),
     !isCurrent && !isRemote && el('span', { class: 'actions row' },
       el('button', {
-        class: 'btn btn-ghost btn-xs', title: 'Switch to this branch',
+        class: 'btn btn-ghost btn-xs btn-icon', title: 'Switch to this branch', 'aria-label': `Switch to ${name}`,
         onclick: () => switchBranch(name),
-      }, '→'),
+      }, icon('arrow-right')),
       el('button', {
-        class: 'btn btn-ghost btn-xs', title: 'Delete',
+        class: 'btn btn-ghost btn-xs btn-icon', title: 'Delete', 'aria-label': `Delete branch ${name}`,
         onclick: async () => {
           if (await confirmModal('Delete branch', `Delete branch ${name}?`)) {
             const r = await withUi(api.post('/api/repo/branch/delete', { name }));
             if (r) refreshAll();
           }
         },
-      }, '🗑'),
+      }, icon('trash-2')),
     ),
     !isCurrent && isRemote && el('span', { class: 'actions row' },
       el('button', {
-        class: 'btn btn-ghost btn-xs', title: 'Checkout: create/switch to the matching local branch',
+        class: 'btn btn-ghost btn-xs btn-icon', title: 'Checkout: create/switch to the matching local branch', 'aria-label': `Check out ${name}`,
         onclick: () => switchBranch(name),
-      }, '→'),
+      }, icon('arrow-right')),
       el('button', {
         class: 'btn btn-ghost btn-xs', title: 'Merge into current branch',
         onclick: () => mergeBranch(name),
-      }, '⇲ merge'),
+      }, icon('git-merge'), 'merge'),
     ),
   );
   $('branch-list').replaceChildren(
@@ -773,7 +785,7 @@ async function switchBranch(name) {
   const r = await withUi(api.post('/api/repo/branch/switch', { name }));
   if (!r) return;
   toast(r.created
-    ? `Created local branch ${r.branch} from ${r.tracking} ✔`
+    ? `Created local branch ${r.branch} from ${r.tracking}`
     : `Branch: ${r.branch}`, 'success');
   refreshAll();
 }
@@ -787,7 +799,7 @@ async function mergeBranch(theirRef) {
     toast(`Conflicts in ${r.conflicts.length} file(s)`, 'error', 6000);
     showTab('merge');
   } else {
-    toast('Merge completed ✔', 'success');
+    toast('Merge completed', 'success');
   }
 }
 
@@ -806,10 +818,10 @@ $('btn-branch').addEventListener('click', async () => {
     el('ul', { class: 'list-pick' },
       branches.local.map((b) =>
         el('li', { onclick: () => { closeModal(); if (b !== branches.current) switchBranch(b); } },
-          b === branches.current ? `✔ ${b}` : `⎇ ${b}`)),
+          b === branches.current ? icon('check', { label: 'Current branch', className: 'ok' }) : icon('git-branch'), ` ${b}`)),
       branches.remote.map((b) =>
         el('li', { onclick: () => { closeModal(); switchBranch(b); } },
-          `☁ ${b}`, el('span', { class: 'muted', style: 'margin-left:auto' }, 'checkout'))),
+          icon('cloud'), ` ${b}`, el('span', { class: 'muted', style: 'margin-left:auto' }, 'checkout'))),
     ),
   );
 });
@@ -835,7 +847,7 @@ async function completeMergeAction() {
   const author = parseAuthor($('commit-author').value.trim());
   const r = await withUi(
     api.post('/api/repo/commit', { message: $('commit-msg').value.trim() || undefined, author }),
-    { loading: 'Completing merge…', success: 'Merge completed ✔' },
+    { loading: 'Completing merge…', success: 'Merge completed' },
   );
   if (r) { $('commit-msg').value = ''; refreshAll(); }
 }
@@ -862,15 +874,16 @@ async function renderMergeView() {
     style: f.conflicted ? '' : 'cursor:default',
   },
     el('span', { class: `st st-${f.conflicted ? (f.resolved ? 'untracked' : 'conflicted') : 'modified'}` },
-      f.conflicted ? '⚡' : { add: 'A', del: 'D', mod: 'M' }[f.type] || 'M'),
+      f.conflicted ? '!' : { add: 'A', del: 'D', mod: 'M' }[f.type] || 'M'), // '!' as in the tree and Changes
     el('span', { class: 'fname', title: f.filepath }, f.filepath),
     el('span', { class: `mv-file-status ${f.conflicted ? (f.resolved ? 'ok' : 'pending') : 'ok'}` },
-      f.conflicted ? (f.resolved ? '✔ resolved' : 'needs resolution — click to open') : '✓ auto-merged'),
+      f.conflicted && !f.resolved ? null : icon('check'),
+      f.conflicted ? (f.resolved ? ' resolved' : 'needs resolution — click to open') : ' auto-merged'),
   );
 
   view.replaceChildren(
     el('div', { class: 'mv-head' },
-      el('h1', {}, '⚡ Merging'),
+      el('h1', {}, icon('git-merge', { className: 'icon-lg' }), ' Merging'),
       el('span', { class: 'mv-branch theirs' }, s.theirs),
       el('span', { class: 'mv-arrow' }, '→'),
       el('span', { class: 'mv-branch ours' }, s.ours),
@@ -906,10 +919,10 @@ async function renderMergeView() {
         class: 'btn btn-primary', disabled: s.pending > 0,
         'aria-describedby': s.pending ? 'mv-complete-reason' : null,
         onclick: completeMergeAction,
-      }, '✔ Complete merge'),
+      }, 'Complete merge'),
       s.pending > 0 && el('span', { class: 'mv-reason', id: 'mv-complete-reason' },
         `Resolve ${s.pending} conflicted file${s.pending === 1 ? '' : 's'} first.`),
-      el('button', { class: 'btn btn-danger-ghost push-end', onclick: abortMergeAction }, '✖ Abort merge…'),
+      el('button', { class: 'btn btn-danger-ghost push-end', onclick: abortMergeAction }, 'Abort merge…'),
     ),
   );
 }
@@ -936,7 +949,7 @@ function closeConflict() {
 
 function conflictProgress(unresolved, total) {
   $('c-progress').textContent = total
-    ? (unresolved ? `${total - unresolved}/${total} resolved` : `all ${total} resolved ✔`)
+    ? (unresolved ? `${total - unresolved}/${total} resolved` : `all ${total} resolved`)
     : '';
   $('c-save').disabled = !conflictTextMode && unresolved > 0;
 }
@@ -1021,7 +1034,7 @@ async function refreshStash() {
 }
 
 const stashOp = (op) => async () => {
-  const r = await withUi(api.post('/api/repo/stash', { op }), { success: `Stash: ${op} ✔` });
+  const r = await withUi(api.post('/api/repo/stash', { op }), { success: `Stash: ${op}` });
   if (r) refreshAll();
 };
 $('btn-stash-push').addEventListener('click', stashOp('push'));
@@ -1038,10 +1051,11 @@ let loadedContent = null;
 let fileStale = false; // disk changed under unsaved edits
 
 function renderFileStatus() {
-  $('file-dirty').textContent = [
+  setChildren($('file-dirty'),
     fileDirty && '● unsaved',
-    fileStale && '⚠ changed on disk',
-  ].filter(Boolean).join(' · ');
+    fileDirty && fileStale && ' · ',
+    fileStale && icon('triangle-alert', { className: 'warn' }),
+    fileStale && ' changed on disk');
 }
 
 function setDirty(dirty) {
@@ -1294,9 +1308,8 @@ async function cloneModal(prefillUrl = '') {
       const q = `url=${encodeURIComponent(url.value.trim())}&dir=${encodeURIComponent(dest.value.trim())}`;
       const t = await api.get(`/api/repo/clone-target?${q}`).catch(() => null);
       if (seq !== previewSeq || !t) return; // a newer keystroke already asked
-      where.textContent = t.notEmpty
-        ? `⚠ ${t.dir} already exists and is not empty — choose another folder`
-        : `Will be cloned into: ${t.dir}`;
+      if (t.notEmpty) where.replaceChildren(icon('triangle-alert', { className: 'bad' }), ` ${t.dir} already exists and is not empty — choose another folder`);
+      else where.textContent = `Will be cloned into: ${t.dir}`;
       cloneBtn.disabled = t.notEmpty;
     }, 200);
   };
@@ -1313,7 +1326,7 @@ async function cloneModal(prefillUrl = '') {
     );
     if (!info) switchingRepo = false;
     if (info) {
-      toast(`Repository cloned into ${info.dir} ✔`, 'success', 6000);
+      toast(`Repository cloned into ${info.dir}`, 'success', 6000);
       closeRepoViews();
       repo = info;
       switchingRepo = false;
@@ -1326,7 +1339,7 @@ async function cloneModal(prefillUrl = '') {
     }
   };
   openModal(
-    el('h2', {}, '⬇ Clone repository'),
+    el('h2', {}, 'Clone repository'),
     el('div', {}, el('label', {}, 'URL'), url),
     el('div', {}, el('label', {}, 'Target'), dest, where),
     el('div', { class: 'modal-actions' },
@@ -1381,13 +1394,13 @@ $('btn-list-prs').addEventListener('click', async () => {
   );
   if (!data) return;
   openModal(
-    el('h2', {}, `⇄ Open PRs / MRs — ${slug}`),
+    el('h2', {}, `Open PRs / MRs — ${slug}`),
     el('ul', { class: 'list-pick' },
       data.prs.length
         ? data.prs.map((p) => el('li', { onclick: () => window.open(p.url, '_blank') },
             el('span', {}, `#${p.number}`),
             el('div', { style: 'flex:1;min-width:0' },
-              el('div', {}, `${p.draft ? '📝 ' : ''}${p.title}`),
+              el('div', {}, icon(p.draft ? 'git-pull-request-draft' : 'git-pull-request', p.draft ? { label: 'Draft' } : {}), ` ${p.title}`),
               el('div', { class: 'muted', style: 'font-size:11px' },
                 `${p.sourceBranch} → ${p.targetBranch} · ${p.author} · ${new Date(p.createdAt).toLocaleDateString()}`)),
           ))
@@ -1456,14 +1469,14 @@ $('btn-create-pr').addEventListener('click', async () => {
               return li;
             })),
       notPushed && el('p', { class: 'muted', style: 'padding:0 12px' },
-        `⚠ ${source.value} is not on origin yet — push it before creating the PR, or the provider will reject it.`),
+        icon('triangle-alert', { className: 'warn' }), ` ${source.value} is not on origin yet — push it before creating the PR, or the provider will reject it.`),
     );
   }
   source.addEventListener('change', updatePreview);
   target.addEventListener('change', updatePreview);
 
   openModal(
-    el('h2', {}, '⇄ Create Pull Request / Merge Request'),
+    el('h2', {}, 'Create Pull Request / Merge Request'),
     el('div', {}, el('label', {}, 'Repository'), slug),
     el('div', { class: 'row' },
       el('div', { style: 'flex:1' }, el('label', {}, 'From (source)'), source),
@@ -1483,7 +1496,7 @@ $('btn-create-pr').addEventListener('click', async () => {
             title: title.value.trim(), body: body.value,
             sourceBranch: source.value, targetBranch: target.value,
           }), { loading: 'Creating PR…' });
-          if (r) { closeModal(); toast(`PR #${r.number} created ✔`, 'success', 6000); window.open(r.url, '_blank'); }
+          if (r) { closeModal(); toast(`PR #${r.number} created`, 'success', 6000); window.open(r.url, '_blank'); }
         },
       }, 'Create'),
     ),
@@ -1500,7 +1513,7 @@ $('btn-issues').addEventListener('click', async () => {
   if (!data) return;
   const title = el('input', { type: 'text', placeholder: 'New issue title' });
   openModal(
-    el('h2', {}, `🐛 Issues for ${slug}`),
+    el('h2', {}, `Issues for ${slug}`),
     el('ul', { class: 'list-pick' },
       data.issues.length
         ? data.issues.map((i) => el('li', { onclick: () => window.open(i.url, '_blank') },
@@ -1514,7 +1527,7 @@ $('btn-issues').addEventListener('click', async () => {
         onclick: async () => {
           if (!title.value.trim()) return;
           const r = await withUi(api.post('/api/providers/issues', { provider, repo: slug, title: title.value.trim() }), { loading: 'Creating issue…' });
-          if (r) { closeModal(); toast(`Issue #${r.number} created ✔`, 'success'); }
+          if (r) { closeModal(); toast(`Issue #${r.number} created`, 'success'); }
         },
       }, 'Create'),
     ),
@@ -1573,9 +1586,18 @@ $('btn-theme').addEventListener('click', () => {
   const next = html.dataset.theme === 'dark' ? 'light' : 'dark';
   html.dataset.theme = next;
   localStorage.setItem('gitnd-theme', next);
-  $('btn-theme').textContent = next === 'dark' ? '🌙' : '☀️';
+  applyThemeButton(next);
 });
+/* The button shows the theme you would switch TO, and says so — set at load
+   too (it used to show 🌙 until the first click, whatever the saved theme). */
+function applyThemeButton(theme) {
+  const other = theme === 'dark' ? 'light' : 'dark';
+  $('btn-theme').replaceChildren(icon(other === 'light' ? 'sun' : 'moon'));
+  $('btn-theme').setAttribute('aria-label', `Switch to ${other} theme`);
+  $('btn-theme').title = `Switch to ${other} theme`;
+}
 document.documentElement.dataset.theme = localStorage.getItem('gitnd-theme') || 'dark';
+applyThemeButton(document.documentElement.dataset.theme);
 
 /* =============================================================== events === */
 

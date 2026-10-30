@@ -32,11 +32,12 @@ test('B-15: a double click on a folder while it loads leaves a coherent tree', a
   await row.click();      // expand: its children load is held
   await row.click();      // collapse while loading
   await sleep(1000);      // the held load lands now
-  await expect(row.locator('.twisty')).toHaveText('▶');
+  // The chevron's rotation follows aria-expanded (CSS), so that is the state to check.
+  await expect(row).toHaveAttribute('aria-expanded', 'false');
   await expect(children).toHaveCount(0);
 
   await row.click();
-  await expect(row.locator('.twisty')).toHaveText('▼');
+  await expect(row).toHaveAttribute('aria-expanded', 'true');
   await expect(children).toHaveCount(1);
   await expect(children.locator('.tree-node')).toHaveCount(1);
 });

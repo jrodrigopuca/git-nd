@@ -1,5 +1,5 @@
 import { api, withUi } from './api.js';
-import { el, fileIcon, toast, makeActivatable } from './ui.js';
+import { el, icon, fileIcon, toast, makeActivatable } from './ui.js';
 
 const container = () => document.getElementById('tree');
 const expanded = new Set();
@@ -33,18 +33,19 @@ function renderNode(entry) {
   const node = el('div', { class: 'tree-node', dataset: { path: entry.path, type: entry.type } });
   const st = statusMap.get(entry.path);
   const row = el('div', { class: 'tree-row' },
-    el('span', { class: 'twisty' }, entry.type === 'dir' ? (expanded.has(entry.path) ? '▼' : '▶') : ''),
-    el('span', {}, fileIcon(entry.name, entry.type)),
+    // A chevron that CSS rotates from the row's aria-expanded: one source of truth.
+    el('span', { class: 'twisty' }, entry.type === 'dir' ? icon('chevron-right', { className: 'icon-sm' }) : null),
+    el('span', { class: 'ficon' }, fileIcon(entry.name, entry.type, expanded.has(entry.path))),
     el('span', { class: 'nm' }, entry.name),
     st ? el('span', { class: `st st-${st}` }, ST_LABEL[st] || '') : null,
   );
 
   // Every expand/collapse bumps `seq`; a children load that comes back after
   // a newer click is dropped. Before, a quick double click collapsed while the
-  // expand was still loading, then the children were appended anyway (▶ with
-  // children shown), and the next click appended a second set (BACKLOG B-15).
+  // expand was still loading, then the children were appended anyway (closed
+  // chevron with children shown), and the next click appended a second set (BACKLOG B-15).
   let seq = 0;
-  const twisty = () => row.querySelector('.twisty');
+  const setFolderIcon = (open) => row.querySelector('.ficon').replaceChildren(fileIcon(entry.name, entry.type, open));
   // Keyboard: rows are focusable and open/toggle with Enter or Space (BACKLOG
   // B-24); folders announce whether they are expanded.
   makeActivatable(row);
@@ -54,13 +55,13 @@ function renderNode(entry) {
     seq++;
     expanded.delete(entry.path);
     node.querySelector('.tree-children')?.remove();
-    twisty().textContent = '▶';
+    setFolderIcon(false);
     row.setAttribute('aria-expanded', 'false');
   };
   const expand = async () => {
     const mine = ++seq;
     expanded.add(entry.path);
-    twisty().textContent = '▼';
+    setFolderIcon(true);
     row.setAttribute('aria-expanded', 'true');
     let children;
     try {

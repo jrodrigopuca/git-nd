@@ -70,9 +70,12 @@ export function icon(name, { label, className = '' } = {}) {
   return svg;
 }
 
+const TOAST_ICON = { success: 'circle-check', error: 'triangle-alert' };
+
 export function toast(message, kind = 'info', ms = 3500) {
   const box = document.getElementById('toasts');
-  const node = el('div', { class: `toast ${kind}` }, message);
+  // The kind is the icon (and the border color); the text says what happened.
+  const node = el('div', { class: `toast ${kind}` }, TOAST_ICON[kind] && icon(TOAST_ICON[kind]), el('span', {}, message));
   box.append(node);
   setTimeout(() => node.remove(), ms);
 }
@@ -126,18 +129,26 @@ export function confirmModal(title, text) {
   });
 }
 
-/* ---- file icons by extension ---- */
-const ICONS = {
-  js: '🟨', mjs: '🟨', cjs: '🟨', ts: '🟦', tsx: '⚛️', jsx: '⚛️',
-  json: '🧾', md: '📝', html: '🌐', css: '🎨', scss: '🎨',
-  py: '🐍', rb: '💎', go: '🐹', rs: '🦀', java: '☕', php: '🐘',
-  sh: '💲', yml: '⚙️', yaml: '⚙️', toml: '⚙️', lock: '🔒',
-  png: '🖼️', jpg: '🖼️', jpeg: '🖼️', gif: '🖼️', svg: '🖼️', ico: '🖼️',
-  pdf: '📕', zip: '📦', gz: '📦', env: '🔑', gitignore: '🚫',
+/* ---- file icons: a generic glyph per CATEGORY, not language logos ----
+   Logos are trademarks and their colors fought the git status colors (M/U/D),
+   which are what matters here; the extension is already in the name. */
+const CATEGORY = {
+  code: 'js mjs cjs ts tsx jsx html css scss py rb go rs java php c h cpp cs kt swift vue svelte',
+  json: 'json',
+  text: 'md txt pdf rst',
+  image: 'png jpg jpeg gif svg ico webp',
+  archive: 'zip gz tgz tar',
+  cog: 'yml yaml toml ini gitignore gitattributes editorconfig',
+  terminal: 'sh bash zsh',
+  lock: 'lock',
+  key: 'env pem key',
+  spreadsheet: 'csv tsv xlsx',
 };
+const EXT_ICON = Object.fromEntries(Object.entries(CATEGORY)
+  .flatMap(([cat, exts]) => exts.split(' ').map((ext) => [ext, `file-${cat === 'text' ? 'text' : cat}`])));
 
-export function fileIcon(name, type) {
-  if (type === 'dir') return '📁';
+export function fileIcon(name, type, expanded = false) {
+  if (type === 'dir') return icon(expanded ? 'folder-open' : 'folder', { className: 'file-icon' });
   const ext = name.split('.').pop().toLowerCase();
-  return ICONS[ext] || '📄';
+  return icon(EXT_ICON[ext] || 'file', { className: 'file-icon' });
 }

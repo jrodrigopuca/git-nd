@@ -32,6 +32,16 @@ test('every icon the UI references exists in the sprite', () => {
   assert.deepEqual(missing, []);
 });
 
+test('no emoji and no text-glyph icons left in the UI (the whole class, every file)', () => {
+  // Comments may use arrows and examples; code and markup may not.
+  const code = sources().replace(/<!--[\s\S]*?-->/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1');
+  const emoji = [...new Set(code.match(/\p{Extended_Pictographic}/gu) || [])];
+  assert.deepEqual(emoji, [], 'emojis render per-OS, in fixed colors that fight the status colors');
+  // Symbols that played the same role as the emojis. Prose arrows (→ ←) stay.
+  const glyphs = [...new Set(code.match(/[⎇⇣⇡⇲⇱▾▶▼✎✕＋⇄✓↻]/gu) || [])];
+  assert.deepEqual(glyphs, [], 'icon-like text glyphs');
+});
+
 test('the vendored icons ship with their licenses', () => {
   const lic = fs.readFileSync(pub('icons/LICENSE'), 'utf8');
   assert.match(lic, /Lucide/);

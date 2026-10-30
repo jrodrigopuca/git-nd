@@ -124,12 +124,20 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
   display: flex; flex-direction: column; align-items: center;
   padding-top: 8px; gap: 4px;
 }
+/* Icons in --muted; the current view in --fg with a 2px accent bar (was opacity
+   0.55 on color emojis plus a ring). aria-current carries it for screen readers. */
 .act-btn {
-  width: 34px; height: 34px; border: none; border-radius: 8px;
-  background: none; font-size: 17px; cursor: pointer; opacity: 0.55;
+  position: relative; width: 34px; height: 34px; border: none; border-radius: 8px;
+  background: none; cursor: pointer; color: var(--muted);
+  display: inline-flex; align-items: center; justify-content: center;
 }
-.act-btn:hover { opacity: 0.9; background: var(--bg3); }
-.act-btn.active { opacity: 1; background: var(--bg3); box-shadow: inset 0 0 0 1px var(--accent); }
+.act-btn .icon { width: 20px; height: 20px; }
+.act-btn:hover { color: var(--fg); background: var(--bg3); }
+.act-btn.active { color: var(--fg); background: var(--bg3); }
+.act-btn.active::before {
+  content: ''; position: absolute; left: -6px; top: 7px; bottom: 7px; width: 2px;
+  border-radius: 2px; background: var(--accent-solid);
+}
 
 .view { display: none; flex: 1; min-width: 0; min-height: 0; }
 .view.active { display: flex; }
@@ -177,7 +185,18 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 .panel-title-actions { display: inline-flex; align-items: center; gap: 2px; }
 /* Icon-only button: a square hit area; the svg inherits the text color. */
 .btn-icon { padding: 0; width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
-.icon { width: 16px; height: 16px; flex: none; }
+.icon { width: 16px; height: 16px; flex: none; vertical-align: -3px; }
+.icon-sm { width: 14px; height: 14px; vertical-align: -2px; }
+.btn .icon { width: 14px; height: 14px; vertical-align: -2px; }
+/* Icon + label: a gap after the icon. (:only-child ignores text nodes, so it
+   cannot tell "icon only" from "icon + text": .btn-icon marks icon-only.) */
+.btn > .icon:first-child { margin-right: 5px; }
+.btn-icon > .icon:first-child { margin-right: 0; }
+.file-icon { color: var(--muted); }
+.icon-lg { width: 20px; height: 20px; vertical-align: -3px; }
+.icon.ok { color: var(--green-text); }
+.icon.warn { color: var(--yellow-text); }
+.icon.bad { color: var(--red-text); }
 
 /* ---------- Files sidebar collapse (visual review 2, F1) ----------
    A 40px rail: the toggle stays the same element (focus is never lost), the
@@ -210,7 +229,11 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
 }
 .tree-row:hover { background: var(--bg3); }
 .tree-row.selected { background: var(--accent-solid); color: var(--accent-fg); }
-.tree-row .twisty { width: 12px; text-align: center; font-size: 9px; color: var(--muted); }
+.tree-row .twisty { width: 14px; display: inline-flex; justify-content: center; color: var(--muted); flex: none; }
+.tree-row .twisty .icon { transition: transform 0.12s; }
+.tree-row[aria-expanded="true"] .twisty .icon { transform: rotate(90deg); }
+.tree-row .ficon { display: inline-flex; }
+@media (prefers-reduced-motion: reduce) { .tree-row .twisty .icon { transition: none; } }
 .tree-children { padding-left: 14px; }
 .tree-row .st { margin-left: auto; font-weight: 700; font-size: 11px; }
 .st-modified { color: var(--yellow-text); }
@@ -507,6 +530,10 @@ input:focus, textarea:focus, select:focus { outline: 1px solid var(--accent); }
 }
 .toast.success { border-left-color: var(--green); }
 .toast.error { border-left-color: var(--red); }
+.toast { display: flex; align-items: flex-start; gap: 8px; }
+.toast > .icon { margin-top: 1px; }
+.toast.success > .icon { color: var(--green-text); }
+.toast.error > .icon { color: var(--red-text); }
 @keyframes slide-in { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 .spinner-overlay {

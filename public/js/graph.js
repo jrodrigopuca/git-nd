@@ -394,9 +394,10 @@ export class GraphView {
 
     let x = textX + 26;
     const chipLimit = metaX - 10; // chips must not cross into the hash/date column
-    const drawChip = (shown, tooltip, { color, current = false, remote = false }) => {
-      const w = labelWidth(shown);
-      const chip = svgEl('g', {});
+    const TAG_ICON = 13; // 11px icon + 2px gap, inside the chip, before the text
+    const drawChip = (shown, tooltip, { color, current = false, remote = false, tag = false }) => {
+      const w = labelWidth(shown) + (tag ? TAG_ICON : 0);
+      const chip = svgEl('g', tag ? { 'data-ref': 'tag' } : {});
       // Chips read as labels, not buttons (V-D, GitKraken pattern): a light
       // tint of their color, radius 4. Remote refs stay dashed, so they are
       // not told apart by color alone; the current branch stays solid.
@@ -406,8 +407,14 @@ export class GraphView {
         stroke: color, 'stroke-width': 1.2,
         'stroke-dasharray': remote ? '3,2' : 'none',
       }));
+      if (tag) {
+        // The sprite icon, drawn in the chip's text color (it was a 🏷 emoji in the text).
+        const use = svgEl('use', { href: '/icons/sprite.svg#i-tag', x: x + 5, y: cy - 5.5, width: 11, height: 11, 'aria-hidden': 'true' });
+        use.style.color = 'var(--fg)';
+        chip.append(use);
+      }
       const label = svgEl('text', {
-        x: x + w / 2, y: cy + 3.5, 'text-anchor': 'middle',
+        x: x + (tag ? TAG_ICON : 0) + (w - (tag ? TAG_ICON : 0)) / 2, y: cy + 3.5, 'text-anchor': 'middle',
         style: `font-size:10.5px; fill: ${current ? 'var(--accent-fg)' : 'var(--fg)'}`,
       });
       label.textContent = shown;
@@ -424,11 +431,11 @@ export class GraphView {
     for (let k = 0; k < rowTips.length; k++) {
       const t = rowTips[k];
       // Long branch names (dependabot/…) get truncated; full name in tooltip.
-      const raw = t.tag ? `🏷 ${t.name}` : t.name;
+      const raw = t.name; // a tag shows the tag icon in its chip instead of a 🏷 in the text
       const shown = raw.length > 24 ? `${raw.slice(0, 11)}…${raw.slice(-11)}` : raw;
       // If more chips follow, keep room for the "+N" overflow chip.
       const reserve = k < rowTips.length - 1 ? labelWidth('+99') + 6 : 0;
-      if (x + labelWidth(shown) > chipLimit - reserve) {
+      if (x + labelWidth(shown) + (t.tag ? TAG_ICON : 0) > chipLimit - reserve) {
         // Too many refs on this commit: collapse the rest into "+N", names in tooltip.
         const rest = rowTips.slice(k);
         drawChip(`+${rest.length}`, rest.map((r) => r.name).join('\n'), { color: 'var(--muted)' });
@@ -437,7 +444,7 @@ export class GraphView {
       // The current branch chip is FILLED with white text on it: it needs the
       // solid accent (4.5:1), not the lighter --accent (2.8:1 in dark).
       const color = t.tag ? 'var(--yellow)' : t.current ? 'var(--accent-solid)' : COLORS[laneIdx % COLORS.length];
-      drawChip(shown, shown !== raw ? t.name : null, { color, current: t.current, remote: t.remote });
+      drawChip(shown, shown !== raw ? t.name : null, { color, current: t.current, remote: t.remote, tag: t.tag });
     }
 
     // Fit the message into the real space left before the meta zone, so long
