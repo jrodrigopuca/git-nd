@@ -674,8 +674,12 @@ function renderMergeBanner(merge) {
   $('tab-btn-merge').hidden = !merge;
   if (merge) {
     renderMergeView();
-  } else if (activeTab() === 'merge') {
-    showTab('graph'); // merge finished/aborted while the view was open
+    // The open conflict file may no longer be part of this merge (another merge, another repo).
+    if (conflictFile && !merge.files.includes(conflictFile)) closeConflict();
+  } else {
+    // Merge finished/aborted: nothing left to resolve (BACKLOG B-07).
+    closeConflict();
+    if (activeTab() === 'merge') showTab('graph');
   }
 }
 
@@ -761,6 +765,20 @@ let conflictFile = null;
 let conflictSegments = [];
 let conflictTextMode = false;
 
+/** Hide the Conflict tab and forget the file it was editing. */
+function closeConflict() {
+  conflictFile = null;
+  conflictSegments = [];
+  conflictTextMode = false;
+  $('c-text').classList.remove('btn-primary');
+  $('conflict-path').textContent = '';
+  $('conflict-visual').replaceChildren();
+  $('conflict-editor').value = '';
+  $('c-progress').textContent = '';
+  document.querySelector('.tab[data-tab="conflict"]').hidden = true;
+  if (activeTab() === 'conflict') showTab(repo?.merge ? 'merge' : 'graph');
+}
+
 function conflictProgress(unresolved, total) {
   $('c-progress').textContent = total
     ? (unresolved ? `${total - unresolved}/${total} resolved` : `all ${total} resolved ✔`)
@@ -824,9 +842,9 @@ $('c-save').addEventListener('click', async () => {
     if (unresolved > 0) return toast(`${unresolved} conflict(s) still unresolved`, 'error');
     content = text;
   }
-  const saved = await withUi(api.post('/api/repo/file', { path: conflictFile, content }));
-  if (saved === null) return;
-  const staged = await withUi(api.post('/api/repo/stage', { path: conflictFile }), { success: `Resolved: ${conflictFile}` });
+  // One server call that refuses unless a merge is in progress and this file is in conflict.
+  const staged = await withUi(api.post('/api/repo/conflict/resolve', { path: conflictFile, content }),
+    { success: `Resolved: ${conflictFile}` });
   if (staged !== null) {
     await refreshAll();
     if (repo?.merge) showTab('merge'); // back to the overview to pick the next file
@@ -1029,12 +1047,25 @@ async function hunkOp(op, path, index, staged) {
 }
 
 /** Close the Diff tab (read-only, nothing to lose); revealed again by the next diff. */
-$('btn-close-diff').addEventListener('click', () => {
+/** Close the Diff tab: drop its content (and with it every hunk button bound to a path). */
+function closeDiff() {
   $('diff-path').textContent = '';
   $('diff-view').replaceChildren();
   document.querySelector('.tab[data-tab="diff"]').hidden = true;
-  showTab('graph');
-});
+  if (activeTab() === 'diff') showTab('graph');
+}
+$('btn-close-diff').addEventListener('click', closeDiff);
+
+/**
+ * Leaving a repo: every view bound to a path of the OLD repo must go, or its
+ * buttons act on the new one — a stale "Discard hunk" wiped changes in the
+ * repo opened next (BACKLOG B-04).
+ */
+function closeRepoViews() {
+  closeFile();
+  closeDiff();
+  closeConflict();
+}
 
 async function showDiff(path, oid, base) {
   const q = (oid ? `&oid=${oid}` : '') + (base ? `&base=${base}` : '');
@@ -1063,7 +1094,7 @@ async function openRepo(dir) {
   if (!(await confirmLeaveFile())) return;
   const info = await withUi(api.post('/api/repo/open', { dir }), { loading: 'Opening repository…' });
   if (!info) return;
-  closeFile();
+  closeRepoViews();
   repo = info;
   addRecent(info.dir);
   closeModal();
@@ -1111,7 +1142,7 @@ async function cloneModal(prefillUrl = '') {
     );
     if (info) {
       toast(`Repository cloned into ${info.dir} ✔`, 'success', 6000);
-      closeFile();
+      closeRepoViews();
       repo = info;
       addRecent(info.dir);
       closeModal();

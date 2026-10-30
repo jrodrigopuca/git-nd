@@ -9,6 +9,7 @@ import { repoRouter } from './routes/repo.js';
 import { authRouter } from './routes/auth.js';
 import { providersRouter } from './routes/providers.js';
 import { registerSocket } from './state.js';
+import { credentialHosts } from './credentials.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3847;
@@ -73,7 +74,7 @@ app.use((err, req, res, _next) => {
 function humanize(err) {
   const map = {
     HttpError: 'The remote rejected the operation. Is your token valid and does it have the right permissions?',
-    UserCanceledError: 'Authentication required: connect GitHub/GitLab or add a token',
+    UserCanceledError: `Authentication required. Tokens are only sent to ${credentialHosts()}: connect that provider, or use a remote on one of those hosts.`,
     NotFoundError: 'The requested resource was not found in the repository',
     CheckoutConflictError: `Local changes would be overwritten: ${err.data?.filepaths?.join(', ') || ''}`,
     PushRejectedError: 'Push rejected: the remote has commits you do not have. Pull first.',

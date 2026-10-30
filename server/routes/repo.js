@@ -39,7 +39,7 @@ repoRouter.get('/api/fs/browse', h(async (req) => {
 
 /* ---- open / clone ---- */
 repoRouter.post('/api/repo/open', h(async (req) => {
-  const dir = gitSvc.openRepo(req.body.dir);
+  const dir = await gitSvc.openRepo(req.body.dir);
   await watchRepo(dir);
   broadcast('repo-opened', { dir });
   return gitSvc.repoInfo();
@@ -155,6 +155,12 @@ repoRouter.get('/api/repo/merge/state', h(() => gitSvc.mergeDetail()));
 repoRouter.post('/api/repo/merge/abort', h(async () => {
   await gitSvc.abortMerge();
   broadcast('merge-updated', { aborted: true });
+}));
+
+repoRouter.post('/api/repo/conflict/resolve', h(async (req) => {
+  const result = await gitSvc.resolveConflict(req.body.path, req.body.content);
+  broadcast('file-changed', { path: req.body.path });
+  return result;
 }));
 
 /* ---- diff / commit detail / compare ---- */

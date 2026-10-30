@@ -9,29 +9,13 @@ import { repoState, AppError } from './state.js';
 import { getSettings, saveSettings } from './settings.js';
 import { tokenStore } from './tokenStore.js';
 import { createHash } from 'node:crypto';
+import { authFor } from './credentials.js'; // onAuth for push/pull/clone: exact host + https only
 import { partitionReachable, GraphWalk } from './commitWalk.js';
 
 const IGNORED_DIRS = new Set(['.git']);
 
 /* ---------------------------------------------------------------- auth --- */
 
-/**
- * Build the onAuth callback for push/pull/clone based on the remote URL host
- * and the tokens stored in the user session (OAuth or PAT).
- */
-function authFor(url, tokens = {}) {
-  return () => {
-    let host = '';
-    try { host = new URL(url).host; } catch { /* ssh urls etc. */ }
-    if (host.includes('gitlab')) {
-      const token = tokens.gitlab;
-      if (token) return { username: 'oauth2', password: token };
-    }
-    const token = tokens.github || tokens.gitlab;
-    if (token) return { username: token, password: 'x-oauth-basic' };
-    return { cancel: true };
-  };
-}
 
 /** Fetch all branches; if the remote HEAD dangles, fall back to just ours. */
 async function fetchRemote(dir, remote, url, tokens, branch) {
@@ -56,8 +40,11 @@ async function remoteUrl(dir, remote = 'origin') {
 
 /* -------------------------------------------------------------- basics --- */
 
-export function openRepo(dir) {
-  return repoState.open(dir);
+/** Open a repo, restoring a merge in progress from .git/MERGE_HEAD if there is one. */
+export async function openRepo(dir) {
+  const resolved = repoState.open(dir);
+  await loadMergeState(resolved);
+  return resolved;
 }
 
 const CLONE_BASE = path.join(os.homedir(), 'git-nd-repos');
@@ -178,14 +165,40 @@ export async function unstage(filepath) {
   await git.resetIndex({ fs, dir, filepath: repoState.relPath(filepath) });
 }
 
+/** The index entry for one path ({ oid, mode }), or null if it is not in the index. */
+async function indexEntry(dir, rel) {
+  const found = await git.walk({
+    fs, dir, cache: repoState.gitCache(), trees: [git.STAGE()],
+    map: async (filepath, [entry]) => {
+      if (filepath === rel) return entry && { oid: await entry.oid(), mode: await entry.mode() };
+      // Prune: only descend into directories on the way to `rel`.
+      if (filepath !== '.' && !rel.startsWith(`${filepath}/`)) return null;
+      return undefined;
+    },
+  });
+  return found.find(Boolean) || null;
+}
+
+/**
+ * Discard UNSTAGED changes: restore the file from the index, like
+ * `git restore <file>`. Restoring from HEAD (as before) also wiped what was
+ * staged, and deleted new staged files outright (BACKLOG B-03).
+ * Untracked files (not in the index) are deleted.
+ */
 export async function discard(filepath) {
   const dir = repoState.requireRepo();
   const rel = repoState.relPath(filepath);
-  try {
-    await git.checkout({ fs, dir, force: true, filepaths: [rel] });
-  } catch {
-    // Untracked file: checkout has nothing to restore, just delete it.
-    await fsp.rm(repoState.safePath(filepath), { force: true });
+  const abs = repoState.safePath(filepath);
+  const entry = await indexEntry(dir, rel);
+  await fsp.rm(abs, { force: true });
+  if (!entry) return; // untracked: nothing to restore
+  const { blob } = await git.readBlob({ fs, dir, oid: entry.oid, cache: repoState.gitCache() });
+  await fsp.mkdir(path.dirname(abs), { recursive: true });
+  if (entry.mode === 0o120000) {
+    await fsp.symlink(Buffer.from(blob).toString('utf8'), abs);
+  } else {
+    await fsp.writeFile(abs, blob);
+    await fsp.chmod(abs, entry.mode === 0o100755 ? 0o755 : 0o644);
   }
 }
 
@@ -548,7 +561,7 @@ export async function resetToCommit(oid) {
   if (!branch) throw new AppError('Detached HEAD: cannot reset', 400);
   await git.writeRef({ fs, dir, ref: `refs/heads/${branch}`, value: oid, force: true });
   await git.checkout({ fs, dir, ref: branch, force: true });
-  repoState.merge = null;
+  await clearMergeState(dir); // a reset ends any merge in progress, as in git
   return { branch, oid };
 }
 
@@ -646,10 +659,89 @@ export async function syncStatus({ tokens, doFetch = false } = {}) {
   return { branch, hasUpstream: true, ahead: left.length, behind: right.length, truncated };
 }
 
+/* ------------------------------------------------- merge state on disk --- */
+/*
+ * A merge in progress is stored the way git stores it (BACKLOG B-06):
+ * .git/MERGE_HEAD holds the incoming oid, .git/MERGE_MSG the message plus a
+ * "# Conflicts:" list. It survives reopening the repo or restarting the
+ * server, and a merge started with the git CLI is picked up too. "Resolved"
+ * is not stored: it is derived from the index (see isResolved).
+ */
+
+const mergePath = (dir, name) => path.join(dir, '.git', name);
+const MERGE_FILES = ['MERGE_HEAD', 'MERGE_MSG', 'MERGE_MODE'];
+
+async function writeMergeState(dir, { theirRef, theirOid, files }) {
+  const conflicts = files.length ? `\n# Conflicts:\n${files.map((f) => `#\t${f}`).join('\n')}\n` : '';
+  await fsp.writeFile(mergePath(dir, 'MERGE_HEAD'), `${theirOid}\n`);
+  await fsp.writeFile(mergePath(dir, 'MERGE_MSG'), `Merge ${theirRef}\n${conflicts}`);
+}
+
+async function clearMergeState(dir) {
+  for (const f of MERGE_FILES) await fsp.rm(mergePath(dir, f), { force: true });
+  repoState.merge = null;
+}
+
+/** Staged, identical to the working file, and free of conflict markers. */
+async function isResolved(dir, rel) {
+  const entry = await indexEntry(dir, rel);
+  const abs = path.join(dir, rel);
+  if (!entry) return !fs.existsSync(abs); // resolved by deleting the file
+  if (!fs.existsSync(abs)) return false;
+  const { blob } = await git.readBlob({ fs, dir, oid: entry.oid, cache: repoState.gitCache() });
+  const staged = Buffer.from(blob);
+  if (!staged.equals(await fsp.readFile(abs))) return false;
+  return !/^(<{7}|>{7})( |$)/m.test(staged.toString('utf8'));
+}
+
+/** Rebuild repoState.merge from .git/MERGE_HEAD (null when no merge is in progress). */
+export async function loadMergeState(dir) {
+  let theirOid;
+  try {
+    theirOid = (await fsp.readFile(mergePath(dir, 'MERGE_HEAD'), 'utf8')).trim().split('\n')[0];
+  } catch {
+    repoState.merge = null;
+    return null;
+  }
+  const msg = await fsp.readFile(mergePath(dir, 'MERGE_MSG'), 'utf8').catch(() => '');
+  // Ours: "Merge feat". git CLI: "Merge branch 'feat'" / "Merge remote-tracking branch 'origin/x'".
+  const theirRef = msg.match(/^Merge (?:remote-tracking )?(?:branch )?'?([^'\n]+?)'?(?: into .*)?$/m)?.[1] || theirOid.slice(0, 7);
+  const section = msg.split(/^# Conflicts:$/m)[1] || '';
+  const files = [...section.matchAll(/^#\t(.+)$/gm)].map((m) => m[1]);
+  const resolved = [];
+  for (const f of files) if (await isResolved(dir, f)) resolved.push(f);
+  repoState.merge = { theirRef, theirOid, files, resolved };
+  return repoState.merge;
+}
+
+/**
+ * A merge ends with a forced checkout of the result, which overwrites the
+ * working tree (BACKLOG B-02). So, before touching anything:
+ * - any change to a tracked file (staged or not) blocks the merge;
+ * - an untracked file blocks it only if the merge brings a file at that path.
+ * Unrelated untracked files are left alone, as git does.
+ */
+async function requireMergeableTree(dir, theirOid) {
+  const matrix = await git.statusMatrix({ fs, dir, cache: repoState.gitCache() });
+  const isUntracked = ([, h, , s]) => h === 0 && s === 0;
+  const changed = matrix.filter((r) => !isUntracked(r) && !(r[1] === 1 && r[2] === 1 && r[3] === 1)).map((r) => r[0]);
+  if (changed.length) {
+    throw new AppError(`Uncommitted changes would be lost by the merge (${changed.join(', ')}): commit or stash them first`, 409);
+  }
+  const untracked = new Set(matrix.filter(isUntracked).map((r) => r[0]));
+  if (!untracked.size) return;
+  const headOid = await git.resolveRef({ fs, dir, ref: 'HEAD' });
+  const clashes = (await changedFiles(dir, headOid, theirOid)).map((f) => f.filepath).filter((p) => untracked.has(p));
+  if (clashes.length) {
+    throw new AppError(`The merge would overwrite untracked files (${clashes.join(', ')}): move or commit them first`, 409);
+  }
+}
+
 async function doMerge(theirRef, author) {
   const dir = repoState.requireRepo();
   const ours = await currentBranch();
   const theirOid = await git.resolveRef({ fs, dir, ref: theirRef });
+  await requireMergeableTree(dir, theirOid);
   try {
     const result = await git.merge({
       fs, dir, ours, theirs: theirRef, abortOnConflict: false, author,
@@ -661,6 +753,7 @@ async function doMerge(theirRef, author) {
     if (err.code === 'MergeConflictError' || err.name === 'MergeConflictError') {
       const files = err.data?.filepaths || [];
       repoState.merge = { theirRef, theirOid, files, resolved: [] };
+      await writeMergeState(dir, repoState.merge);
       // isomorphic-git writes merge results to the workdir but stages nothing.
       // Stage the auto-merged (non-conflicted) files like real git does, or
       // the final merge commit would silently drop them.
@@ -865,6 +958,24 @@ export async function mergeDetail() {
   };
 }
 
+/**
+ * Save a conflict resolution and mark it resolved — only while a merge is in
+ * progress and only for a file it left in conflict. A stale Conflict tab
+ * (merge aborted, repo switched) used to write and stage its content into a
+ * tree with no merge, partly undoing the abort (BACKLOG B-07).
+ */
+export async function resolveConflict(filepath, content) {
+  repoState.requireRepo();
+  const rel = repoState.relPath(filepath);
+  const merge = repoState.merge;
+  if (!merge) throw new AppError('No merge in progress: nothing to resolve', 409);
+  if (!merge.files.includes(rel)) throw new AppError(`${rel} is not in conflict in this merge`, 409);
+  if (/^(<{7}|={7}|>{7})( |$)/m.test(content)) throw new AppError('There are still conflict markers left', 400);
+  await writeFile(rel, content);
+  await stage(rel);
+  return { resolved: rel };
+}
+
 export async function completeMerge({ message, author }) {
   const dir = repoState.requireRepo();
   const merge = repoState.merge;
@@ -881,7 +992,7 @@ export async function completeMerge({ message, author }) {
     author: who,
     parent: [headOid, merge.theirOid],
   });
-  repoState.merge = null;
+  await clearMergeState(dir);
   return { oid, merged: true };
 }
 
@@ -890,7 +1001,7 @@ export async function abortMerge() {
   if (!repoState.merge) throw new AppError('No merge in progress', 400);
   const branch = await currentBranch();
   await git.checkout({ fs, dir, ref: branch, force: true });
-  repoState.merge = null;
+  await clearMergeState(dir);
 }
 
 /* ---------------------------------------------------------------- diff --- */
@@ -1027,6 +1138,7 @@ function hunkRows(h) {
   for (const line of h.lines) {
     const tag = line[0];
     const text = line.slice(1);
+    if (tag === '\\') continue; // "\ No newline at end of file": a marker, not a file line
     if (tag === '-') removed.push(text);
     else if (tag === '+') {
       if (removed.length) {
@@ -1043,9 +1155,31 @@ function hunkRows(h) {
   return rows;
 }
 
-/** Apply the selected hunks (by index) onto oldText; unselected hunks are skipped. */
+/** Split keeping each line's terminator: "a\nb" → ["a\n", "b"]; "a\n" → ["a\n"]. */
+const splitKeepEol = (text) => text.match(/[^\n]*\n|[^\n]+$/g) || [];
+
+/**
+ * A hunk's lines as [tag, text-with-terminator]. jsdiff marks a line that
+ * lacks a final "\n" with a following "\ No newline at end of file" entry;
+ * that marker only strips the "\n" from the previous line (BACKLOG B-05 —
+ * it used to be written into the file as text).
+ */
+function hunkLines(h) {
+  const lines = [];
+  for (const line of h.lines) {
+    if (line[0] === '\\') {
+      const last = lines[lines.length - 1];
+      if (last) last[1] = last[1].replace(/\n$/, '');
+    } else {
+      lines.push([line[0], `${line.slice(1)}\n`]);
+    }
+  }
+  return lines;
+}
+
+/** Apply the selected hunks (by index) onto oldText; unselected hunks are skipped. Byte-exact. */
 function applyHunks(oldText, hunks, selected) {
-  const oldLines = oldText.split('\n');
+  const oldLines = splitKeepEol(oldText);
   const out = [];
   let cursor = 0;
   hunks.forEach((h, i) => {
@@ -1054,15 +1188,14 @@ function applyHunks(oldText, hunks, selected) {
     out.push(...oldLines.slice(cursor, start));
     cursor = start;
     if (!selected.includes(i)) return; // leave the old content untouched
-    for (const line of h.lines) {
-      const tag = line[0];
-      if (tag === '+') out.push(line.slice(1));
+    for (const [tag, text] of hunkLines(h)) {
+      if (tag === '+') out.push(text);
       else if (tag === '-') cursor++;
-      else { out.push(line.slice(1)); cursor++; }
+      else { out.push(oldLines[cursor]); cursor++; } // context: keep the file's own bytes
     }
   });
   out.push(...oldLines.slice(cursor));
-  return out.join('\n');
+  return out.join('');
 }
 
 const reverseHunk = (h) => ({
