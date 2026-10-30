@@ -393,6 +393,7 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
   - Tokens solo de texto y de relleno sólido en los dos temas: `--accent-solid`, `--danger-solid`, `--red-text`, `--green-text`, `--yellow-text`, `--ours-text`, `--theirs-text`, `--link` y `--border-strong`.
   - Los botones sólidos **oscurecen** en hover, así el contraste sube en lugar de bajar.
   - `test/contrast.test.js` calcula cada par desde `style.css`, en los dos temas y con el hover. Además falla si algún `color:` usa un color de relleno.
+  - **Agregado durante V-E:** faltaba la otra mitad, **texto sobre un relleno claro**. La fila seleccionada del árbol, el badge de Changes y los badges de Pull y Push tenían texto blanco sobre `--accent` (2,82:1). Pasaron a `--accent-solid`, y el test ahora también falla si una regla pone texto sobre un color de relleno.
 
 ### V-C `[x]` 🟠 La acción destructiva era la más visible; varias acciones primarias a la vez
 
@@ -434,11 +435,19 @@ Informe del agente de UX/UI, con capturas y mockup en el scratchpad de la sesió
 
   Mantiene las filas de 28 px, la virtualización, el roving tabindex y los tests. Esfuerzo M.
 
-### V-E `[ ]` 🟠 Por debajo de 980 px no se puede commitear
+### V-E `[x]` 🟠 Por debajo de 980 px no se puede commitear
 
 - **Dónde:** `public/css/style.css`, regla `@media (max-width: 980px) { .rightbar { display: none } }`.
 - **Descripción:** Changes, el stage y Commit viven en `.rightbar`, que desaparece por debajo de 980 px. En una laptop chica no se puede commitear. Es un bug funcional, no solo visual.
 - **Propuesta:** un panel desplegable que se abre desde un botón en la barra superior (con el badge de cambios), y el sidebar a 200 px. Esfuerzo M.
+- **Cerrado:**
+  - Con 980 px o menos, `.rightbar` es un panel fijo que entra desde la derecha, sobre un fondo semitransparente. Cerrado tiene `visibility: hidden`, así que sale del orden de Tab y del árbol de accesibilidad sin necesidad de JS.
+  - El botón `#btn-panel` lleva `aria-expanded`, `aria-controls` y un badge con la cantidad de cambios.
+  - Se cierra con ✕, con Escape (salvo que haya un modal abierto) o con un click en el fondo. El foco entra al panel al abrir y vuelve al botón al cerrar.
+  - Al ensanchar la ventana con el panel abierto, vuelve a ser la columna normal, sin animación en el cruce.
+  - Sin animación si el sistema pide `prefers-reduced-motion`.
+  - Test: `e2e/narrow.spec.js`, 4 tests, que incluye stage y commit desde el panel. Con el código anterior fallan 3; el cuarto es una regresión en ventana ancha.
+  - Verificación visual con capturas a 960 px en los dos temas, con el panel abierto y cerrado.
 
 ### B-25 `[?]` 🟡 "Initial commit" aparece dos veces en el historial
 

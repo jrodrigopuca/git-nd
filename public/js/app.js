@@ -34,6 +34,42 @@ function showTab(name) {
 document.querySelectorAll('.tab').forEach((t) =>
   t.addEventListener('click', () => showTab(t.dataset.tab)));
 
+/* ======================================================= right-panel drawer === */
+/* Narrow windows (≤980px): the right panel — Changes, staging, commit — is a
+   drawer opened from the top bar instead of disappearing (visual review V-E).
+   CSS does the layout; this keeps state, focus and closing in line. */
+
+const narrowMq = window.matchMedia('(max-width: 980px)');
+const panelOpen = () => $('rightbar').classList.contains('open');
+
+function setPanel(open) {
+  $('rightbar').classList.toggle('open', open);
+  $('btn-panel').setAttribute('aria-expanded', String(open));
+  $('drawer-scrim').hidden = !open;
+  if (open) {
+    $('btn-panel-close').focus(); // focus moves into the panel
+  } else if ($('rightbar').contains(document.activeElement) && narrowMq.matches) {
+    $('btn-panel').focus(); // …and back to what opened it
+  }
+}
+
+$('btn-panel').addEventListener('click', () => setPanel(!panelOpen()));
+$('btn-panel-close').addEventListener('click', () => setPanel(false));
+$('drawer-scrim').addEventListener('click', () => setPanel(false));
+document.addEventListener('keydown', (e) => {
+  // Esc closes the drawer — unless a modal is open (Esc belongs to the modal then).
+  if (e.key === 'Escape' && panelOpen() && narrowMq.matches && $('modal-backdrop').hidden) setPanel(false);
+});
+// Widening the window turns the drawer back into the normal column: drop the
+// open state — without the slide-out animation, which would otherwise play
+// across the breakpoint while the window is being resized.
+narrowMq.addEventListener('change', () => {
+  if (!panelOpen()) return;
+  $('rightbar').classList.add('no-anim');
+  setPanel(false);
+  requestAnimationFrame(() => requestAnimationFrame(() => $('rightbar').classList.remove('no-anim')));
+});
+
 const activeTab = () => document.querySelector('.tab.active')?.dataset.tab;
 
 /* ============================================================== recents === */
@@ -261,6 +297,9 @@ function renderChanges(status) {
   const staged = status.files.filter((f) => f.stageStatus && !f.conflicted);
   const unstaged = status.files.filter((f) => (f.workStatus || f.conflicted));
   $('changes-count').textContent = status.files.length;
+  // Same count on the narrow-window "Changes" button (the panel is a drawer there).
+  $('panel-badge').textContent = status.files.length;
+  $('panel-badge').hidden = status.files.length === 0;
 
   const item = (f, isStaged) => {
     const st = f.conflicted ? 'conflicted' : (isStaged ? f.stageStatus : f.workStatus);

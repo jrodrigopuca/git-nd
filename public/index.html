@@ -20,6 +20,8 @@
     <button class="btn" id="btn-pull" title="Pull">⇣ Pull<span class="count-badge" id="behind-badge" hidden></span></button>
     <button class="btn btn-ghost" id="btn-pull-mode" title="Pull mode (merge / rebase)">▾</button>
     <button class="btn" id="btn-push" title="Push (Ctrl+Shift+P)">⇡ Push<span class="count-badge" id="ahead-badge" hidden></span></button>
+    <!-- Narrow windows only (≤980px): opens the right panel as a drawer (visual review V-E). -->
+    <button class="btn" id="btn-panel" aria-controls="rightbar" aria-expanded="false" title="Changes and commit">✎ Changes<span class="count-badge" id="panel-badge" hidden></span></button>
     <button class="btn btn-ghost" id="btn-theme" title="Light/dark mode">🌙</button>
     <button class="btn btn-ghost" id="btn-auth" title="Connections">👤 Connect</button>
   </header>
@@ -124,7 +126,11 @@
           </section>
         </main>
 
-        <aside class="rightbar" id="rightbar">
+        <aside class="rightbar" id="rightbar" aria-label="Changes and commit">
+          <div class="drawer-head">
+            <strong>Changes &amp; commit</strong>
+            <button class="btn btn-ghost btn-xs" id="btn-panel-close" aria-label="Close panel" title="Close (Esc)">✕</button>
+          </div>
           <div class="merge-banner" id="merge-banner" hidden>
             <strong>⚠ Merge in progress</strong>
             <button class="btn btn-xs" id="btn-merge-view">⚡ Open merge view</button>
@@ -201,6 +207,7 @@
     <div class="modal" id="modal" role="dialog"></div>
   </div>
 
+  <div class="drawer-scrim" id="drawer-scrim" hidden></div>
   <div class="toasts" id="toasts"></div>
   <div class="spinner-overlay" id="spinner" hidden><div class="spinner"></div><span id="spinner-text"></span></div>
 

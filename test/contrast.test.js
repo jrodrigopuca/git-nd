@@ -84,6 +84,16 @@ test('no text color uses a FILL token anywhere (the whole class, not a list of s
   assert.doesNotMatch(js, /t\.current \? 'var\(--accent\)'/, 'the filled current-branch chip uses --accent-solid');
 });
 
+test('no text sits on a light FILL token (the other half: white text on --accent was 2.82:1)', () => {
+  // A rule that paints a fill-token background AND sets a text color puts text
+  // on it: it must use the solid tokens (--accent-solid / --danger-solid).
+  const offenders = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+    .filter(([, , body]) => /background:\s*var\(--(accent|red|green|yellow|ours-strong|incoming-strong)\)/.test(body)
+      && /(^|[;\s])color:/.test(body))
+    .map(([, sel]) => sel.trim());
+  assert.deepEqual(offenders, []);
+});
+
 test('selectors use the text-safe tokens (not the fill colors)', () => {
   const rule = (sel) => css.match(new RegExp(`(^|\\n)\\s*${sel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`))?.[2] ?? '';
   assert.match(rule('.btn-primary'), /background:\s*var\(--accent-solid\)/);
