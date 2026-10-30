@@ -4,12 +4,12 @@
   "description": "Local web GUI for managing Git repositories (isomorphic-git + Express)",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node --test test/"
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "chokidar": "^5.0.0",

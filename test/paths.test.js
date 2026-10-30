@@ -63,10 +63,10 @@ test('a symlink pointing inside the repo still works', async () => {
 test('the links themselves can still be staged and discarded (git tracks links, not targets)', async () => {
   const dir = linkedRepo('linkops');
   await svc.openRepo(dir);
-  fs.rmSync(path.join(dir, 'outfile'));
+  fs.unlinkSync(path.join(dir, 'outfile')); // unlink, not rm: removes the LINK (Node 24's rmSync refuses links to dirs)
   await svc.discard('outfile'); // restores the LINK from the index
   assert.equal(fs.readlinkSync(path.join(dir, 'outfile')), path.join(outside, 'secret.txt'));
-  fs.rmSync(path.join(dir, 'outdir'));
+  fs.unlinkSync(path.join(dir, 'outdir'));
   await svc.stage('outdir'); // stages the deletion of the link
   assert.match(git(dir, 'status', '--porcelain'), /^D  outdir$/m);
 });

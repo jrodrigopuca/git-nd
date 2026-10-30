@@ -40,7 +40,7 @@ test('hunk operations on a symlink are refused and the link blob is untouched', 
 test('whole-entry stage of a re-pointed link still works', async () => {
   const dir = linkRepo('repoint');
   write(dir, 'b.txt', 'b\n');
-  fs.rmSync(path.join(dir, 'l.txt'));
+  fs.unlinkSync(path.join(dir, 'l.txt')); // remove the link itself
   fs.symlinkSync('b.txt', path.join(dir, 'l.txt'));
   await svc.openRepo(dir);
   await svc.stage('l.txt');
