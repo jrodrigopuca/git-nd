@@ -89,7 +89,9 @@ code, pre, .file-view, .diff-view, .conflict-editor, .tree {
   border-bottom: 1px solid var(--border);
 }
 .brand { font-size: 15px; margin-right: 8px; display: inline-flex; align-items: center; gap: 6px; }
-.brand .icon { width: 20px; height: 20px; color: var(--brand); }
+/* P3: the leaf line in the text color, like every icon in the bar; the commit
+   node at its root is the one --brand accent (set inside the symbol). */
+.brand .icon { width: 20px; height: 20px; color: var(--fg); }
 .spacer { flex: 1; }
 .repo-chip { display: flex; align-items: center; gap: 6px; background: var(--bg3); border-radius: 6px; padding: 2px 4px 2px 10px; }
 

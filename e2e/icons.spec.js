@@ -3,7 +3,10 @@
 // (it is a local tool: no CDN for icons or fonts).
 import { test, expect } from './fixtures.js';
 
-test('the brand is the leaf from the local sprite, in --brand, in both themes', async ({ app, repos, page }) => {
+// P3: the leaf line takes the text color (--fg) like the rest of the bar; only
+// the commit node is --brand (checked in test/icons.test.js and by screenshot:
+// the <use> shadow tree's computed fill is not reachable from the page).
+test('the brand is the leaf from the local sprite, its line in --fg, in both themes', async ({ app, repos, page }) => {
   await app.boot(repos.make('R'));
   const leaf = page.locator('.brand svg.icon');
   await expect(leaf).toBeVisible();
@@ -15,13 +18,13 @@ test('the brand is the leaf from the local sprite, in --brand, in both themes', 
     await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
     const { color, brand } = await leaf.evaluate((s) => {
       const probe = document.createElement('i');
-      probe.style.color = 'var(--brand)';
+      probe.style.color = 'var(--fg)';
       document.body.append(probe);
       const brandColor = getComputedStyle(probe).color;
       probe.remove();
       return { color: getComputedStyle(s).color, brand: brandColor };
     });
-    expect(color, `${theme}: leaf painted with --brand`).toBe(brand);
+    expect(color, `${theme}: leaf line painted with --fg`).toBe(brand);
   }
   // The sprite actually loads (a broken href renders an empty box).
   const status = await page.evaluate(async () => (await fetch('/icons/sprite.svg')).status);

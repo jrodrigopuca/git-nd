@@ -51,16 +51,22 @@ test('the vendored icons ship with their licenses', () => {
   assert.match(lic, /CC0/);
 });
 
-test('brand: one leaf with the commit node cut out (evenodd), and an SVG favicon', () => {
+test('brand (P3): a line leaf in the Lucide grammar, rooted in a commit node filled with --brand', () => {
   const leaf = sprite.match(/<symbol id="i-leaf-brand"[^>]*>([\s\S]*?)<\/symbol>/)?.[1] ?? '';
-  assert.equal((leaf.match(/<path/g) || []).length, 1, 'a single path');
-  assert.match(leaf, /fill-rule="evenodd"/);
-  assert.match(leaf, /fill="currentColor"/);
+  // The leaf speaks the same language as every other icon: stroke 2, round
+  // caps/joins, in the text color — not a solid blot (the v3 leaf stood out).
+  assert.match(leaf, /<g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">/);
+  assert.doesNotMatch(leaf, /fill-rule="evenodd"/);
+  // The one accent: the commit node, a filled dot in --brand (graph nodes are dots).
+  // As CSS (style=), not a presentation attribute: var() there is not portable.
+  assert.match(leaf, /<circle [^>]*style="fill:\s*var\(--brand, currentColor\)"/);
 
   const html = fs.readFileSync(pub('index.html'), 'utf8');
   assert.match(html, /<link rel="icon" href="\/icons\/favicon\.svg" type="image\/svg\+xml"/);
   const fav = fs.readFileSync(pub('icons/favicon.svg'), 'utf8');
   assert.match(fav, /viewBox="0 0 16 16"/, 'drawn on its own 16px grid');
-  assert.match(fav, /fill-rule="evenodd"/);
+  // The tab needs a SOLID mark: a 1.5px line falls apart at a real 16px raster.
+  assert.match(fav, /<path fill="#[0-9a-f]{6}"/i);
+  assert.match(fav, /<circle [^>]*fill="#[0-9a-f]{6}"/i);
   assert.doesNotMatch(fav, /\p{Extended_Pictographic}/u);
 });
