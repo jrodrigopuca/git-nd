@@ -65,6 +65,7 @@ authRouter.get('/api/auth/status', (req, res) => {
       connected: !!tokenStore.get(name),
       user: tokenStore.user(name),
       oauthConfigured: !!oauthEnv[name]?.(),
+      token: getProvider(name).token, // scopes + where to create a PAT (Connections help)
     })),
   });
 });

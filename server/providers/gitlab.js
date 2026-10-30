@@ -18,7 +18,16 @@ async function gl(token, endpoint, options = {}) {
   return res.json();
 }
 
+// One list for OAuth and for the PAT help in Connections, so they can't drift.
+const SCOPES = ['api', 'read_user'];
+
 export class GitLabProvider {
+  /** What a personal access token needs, and where to create one (prefilled; self-hosted via GITLAB_URL). */
+  token = {
+    scopes: SCOPES,
+    createUrl: `${API}/-/user_settings/personal_access_tokens?${new URLSearchParams({ name: 'git-nd', scopes: SCOPES.join(',') })}`,
+  };
+
   name = 'gitlab';
 
   async getUser(token) {
@@ -98,7 +107,7 @@ export class GitLabProvider {
         client_id: clientId,
         redirect_uri: redirect,
         response_type: 'code',
-        scope: 'api read_user',
+        scope: SCOPES.join(' '),
         state,
       });
       return `${API}/oauth/authorize?${q}`;

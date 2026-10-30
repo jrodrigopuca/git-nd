@@ -168,51 +168,128 @@ async function renderExplorerRemote() {
 async function renderConnections() {
   authStatus = await api.get('/api/auth/status').catch(() => null);
   updateAuthButton();
-  const cards = (authStatus?.providers || []).map((p) => {
-    const patInput = el('input', { type: 'password', placeholder: `${p.name} personal access token (PAT)` });
-    const connectWithPat = async () => {
-      const r = await withUi(
-        api.post('/api/auth/token', { provider: p.name, token: patInput.value.trim() }),
-        { loading: 'Validating token…' },
-      );
-      if (r) { toast(`Connected to ${p.name} as ${r.user.login}`, 'success'); renderConnections(); }
-    };
-    patInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') connectWithPat(); });
+  $('conn-cards').replaceChildren(...(authStatus?.providers || []).map(connectionCard));
+}
 
-    return el('div', { class: 'conn-card' },
-      el('h2', {}, icon(p.name === 'github' ? 'github' : 'gitlab'), p.name === 'github' ? ' GitHub' : ' GitLab'),
-      p.connected
-        ? el('div', { class: 'col' },
-            el('div', { class: 'row' },
-              p.user?.avatar ? el('img', { class: 'avatar', src: p.user.avatar, alt: '' }) : null,
-              el('div', {},
-                el('div', {}, `${p.user?.name || p.user?.login} `, icon('circle-check', { label: 'Connected', className: 'ok' })),
-                el('div', { class: 'muted', style: 'font-size:11.5px' }, p.user?.email || p.user?.login)),
-            ),
-            el('div', { class: 'row' },
-              el('button', {
-                class: 'btn', onclick: async () => {
-                  await api.post('/api/auth/logout', { provider: p.name });
-                  toast(`Disconnected from ${p.name}`);
-                  renderConnections();
-                },
-              }, 'Sign out'),
-              el('button', { class: 'btn', onclick: () => switchView('explorer') }, 'Browse repos →'),
-            ),
-          )
-        : el('div', { class: 'col' },
-            p.oauthConfigured
-              ? el('a', { href: `/auth/${p.name}/login`, class: 'btn btn-primary', style: 'text-align:center;text-decoration:none' }, `Sign in with OAuth`)
-              : el('span', { class: 'muted', style: 'font-size:11.5px' },
-                  `OAuth not configured (set ${p.name.toUpperCase()}_CLIENT_ID / _CLIENT_SECRET). Use a personal access token:`),
-            el('div', { class: 'row' },
-              patInput,
-              el('button', { class: 'btn btn-primary', onclick: connectWithPat }, 'Connect'),
-            ),
-          ),
+const PROVIDER_LABEL = { github: 'GitHub', gitlab: 'GitLab' };
+
+/**
+ * One provider (visual review 2, R2-6): name + state in the header; connected
+ * → who you are, Browse, Disconnect; not connected → a labelled token field
+ * with show/hide, the scopes it needs and where to create it, and the error
+ * NEXT TO the field (a toast alone vanished). With OAuth configured, one-click
+ * sign-in is the primary and the token is the folded alternative.
+ */
+function connectionCard(p) {
+  const label = PROVIDER_LABEL[p.name] || p.name;
+  const state = p.connected
+    ? el('span', { class: 'conn-state ok' }, icon('circle-check'), 'Connected')
+    : el('span', { class: 'conn-state' }, 'Not connected');
+  const head = el('div', { class: 'conn-head' },
+    el('h2', {}, icon(p.name in PROVIDER_LABEL ? p.name : 'plug'), ` ${label}`), state);
+
+  if (p.connected) {
+    const u = p.user || {};
+    return el('section', { class: 'conn-card', 'data-provider': p.name, 'aria-label': label },
+      head,
+      el('div', { class: 'conn-user' },
+        u.avatar ? el('img', { class: 'avatar', src: u.avatar, alt: '' }) : el('span', { class: 'avatar avatar-empty' }, icon('circle-user-round')),
+        el('div', {},
+          el('div', { class: 'conn-name' }, u.name || u.login || label),
+          el('div', { class: 'muted conn-sub' }, [u.login && `@${u.login}`, u.email].filter(Boolean).join(' · '))),
+      ),
+      el('div', { class: 'row conn-actions' },
+        el('button', { class: 'btn', onclick: () => switchView('explorer') }, 'Browse repositories', icon('arrow-right', { className: 'icon-after' })),
+        el('button', {
+          class: 'btn btn-ghost push-end', onclick: async () => {
+            await api.post('/api/auth/logout', { provider: p.name }).catch((e) => toast(e.message, 'error'));
+            toast(`Disconnected from ${label}`);
+            renderConnections();
+          },
+        }, 'Disconnect'),
+      ),
     );
+  }
+
+  const tokenForm = patForm(p, label, { primary: !p.oauthConfigured });
+  const body = p.oauthConfigured
+    ? [
+        el('a', { href: `/auth/${p.name}/login`, class: 'btn btn-primary conn-oauth' }, `Sign in with ${label}`),
+        el('details', { class: 'conn-alt' }, el('summary', {}, 'Use a personal access token instead'), tokenForm),
+      ]
+    : [
+        tokenForm,
+        el('details', { class: 'conn-alt' },
+          el('summary', {}, 'Prefer one-click sign-in?'),
+          el('p', { class: 'muted conn-help' },
+            `Register an OAuth app and start git-nd with ${p.name.toUpperCase()}_CLIENT_ID and ${p.name.toUpperCase()}_CLIENT_SECRET set; a "Sign in with ${label}" button appears here.`)),
+      ];
+  return el('section', { class: 'conn-card', 'data-provider': p.name, 'aria-label': label }, head, ...body);
+}
+
+/** The personal-access-token form: label, show/hide, scopes + link, inline error. */
+function patForm(p, label, { primary }) {
+  const id = `pat-${p.name}`;
+  const helpId = `${id}-help`;
+  const errId = `${id}-error`;
+  const input = el('input', { type: 'password', id, autocomplete: 'off', spellcheck: 'false', 'aria-describedby': helpId });
+  const eye = el('button', { type: 'button', class: 'btn btn-ghost btn-icon conn-eye', 'aria-label': 'Show token', 'aria-pressed': 'false', title: 'Show token' }, icon('eye'));
+  eye.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    eye.setAttribute('aria-pressed', String(show));
+    eye.replaceChildren(icon(show ? 'eye-off' : 'eye'));
   });
-  $('conn-cards').replaceChildren(...cards);
+  const connect = el('button', { type: 'submit', class: `btn ${primary ? 'btn-primary' : ''}` }, 'Connect');
+  const error = el('p', { class: 'conn-error', id: errId, hidden: true });
+  const setError = (msg) => {
+    error.hidden = !msg;
+    error.replaceChildren(...(msg ? [icon('triangle-alert'), ` ${msg}`] : []));
+    if (msg) {
+      input.setAttribute('aria-invalid', 'true');
+      input.setAttribute('aria-describedby', `${errId} ${helpId}`);
+    } else {
+      input.removeAttribute('aria-invalid');
+      input.setAttribute('aria-describedby', helpId);
+    }
+  };
+  input.addEventListener('input', () => { if (!error.hidden) setError(''); });
+
+  const scopes = p.token?.scopes || [];
+  const help = el('p', { class: 'muted conn-help', id: helpId },
+    scopes.length ? ['Needs the ', ...scopes.flatMap((s, i) => [i ? ' and ' : '', el('code', {}, s)]), ' scopes. '] : '',
+    p.token?.createUrl && el('a', { href: p.token.createUrl, target: '_blank', rel: 'noopener noreferrer' },
+      `Create a token on ${label}`, icon('external-link', { className: 'icon-after' })));
+
+  const form = el('form', { class: 'conn-form', novalidate: true },
+    el('label', { for: id }, 'Personal access token'),
+    el('div', { class: 'conn-field' }, input, eye, connect),
+    error,
+    help,
+  );
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const token = input.value.trim();
+    if (!token) { setError('Paste a token first.'); input.focus(); return; }
+    setError('');
+    input.disabled = true;
+    connect.disabled = true;
+    connect.textContent = 'Checking…';
+    form.setAttribute('aria-busy', 'true');
+    try {
+      const r = await api.post('/api/auth/token', { provider: p.name, token });
+      toast(`Connected to ${label} as ${r.user.login}`, 'success');
+      renderConnections();
+    } catch (err) {
+      input.disabled = false;
+      connect.disabled = false;
+      connect.textContent = 'Connect';
+      form.removeAttribute('aria-busy');
+      setError(err.status === 401 || err.status === 403 ? `${label} rejected this token: ${err.message}` : err.message);
+      input.focus();
+    }
+  });
+  return form;
 }
 
 function updateAuthButton() {

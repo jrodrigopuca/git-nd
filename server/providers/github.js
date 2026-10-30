@@ -19,7 +19,16 @@ async function gh(token, endpoint, options = {}) {
   return res.json();
 }
 
+// One list for OAuth and for the PAT help in Connections, so they can't drift.
+const SCOPES = ['repo', 'read:user'];
+
 export class GitHubProvider {
+  /** What a personal access token needs, and where to create one (prefilled). */
+  token = {
+    scopes: SCOPES,
+    createUrl: `https://github.com/settings/tokens/new?scopes=${SCOPES.join(',')}&description=git-nd`,
+  };
+
   name = 'github';
 
   async getUser(token) {
@@ -96,7 +105,7 @@ export class GitHubProvider {
       const q = new URLSearchParams({
         client_id: clientId,
         redirect_uri: redirect,
-        scope: 'repo read:user',
+        scope: SCOPES.join(' '),
         state,
       });
       return `https://github.com/login/oauth/authorize?${q}`;

@@ -515,7 +515,30 @@ Propuestas, mockups y capturas del antes: `review-ux-2/` del agente de UX/UI. Or
 - **Diseño:** la variante "Viento" (c), elegida por el usuario en la tercera iteración a partir de su referencia. Es una hoja en S con el nodo de commit recortado (evenodd), así que funciona en los dos temas sin un blanco fijo.
 - **Color:** `--brand` es `#008080` en claro y `#2aa8a2` en oscuro, ≥3:1 sobre bg/bg2/bg3. `test/contrast.test.js` lo verifica.
 - **Favicon:** `public/icons/favicon.svg` está dibujado sobre su propia grilla de 16 px, en un solo color `#0a8f8a`. Reemplaza el data-URI con 🌿.
-### R2-6 `[ ]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
+- **Reabierto (iteración 4):** con todos los íconos de trazo, el usuario ve la hoja rellena incoherente con el resto. ux-ui está proponiendo una versión de la misma familia que Lucide.
+### R2-6 `[x]` 🟡 Connections: tarjetas por proveedor, label y error junto al campo, OAuth plegado
+- **Tarjetas:** una columna de hasta 720 px. Cada encabezado tiene el logo, el nombre y el estado ("Not connected", o "Connected" en `--green-text`).
+- **Sin conectar:**
+  - Label visible "Personal access token" y un botón ojo con `aria-pressed`.
+  - Debajo, los scopes que necesita y el link "Create a token on …", que abre en otra pestaña con `noopener` y ya trae los scopes cargados.
+  - La configuración de OAuth queda plegada en un `<details>`.
+- **Con OAuth configurado:** "Sign in with …" es el único primario y el token queda como alternativa plegada.
+- **Validando:** el botón dice "Checking…", y el botón y el input quedan deshabilitados, con `aria-busy`.
+- **Error:**
+  - El mensaje va junto al campo, con `aria-invalid` y `aria-describedby`, y sigue visible después del toast.
+  - El token no se borra.
+  - Al volver a escribir, el error se limpia.
+- **Conectado:** avatar, nombre, `@login · email`, "Browse repositories" y "Disconnect" en ghost.
+- **Nota de cifrado:** baja al pie, con `shield-check`.
+- **Servidor:** cada provider declara `token: { scopes, createUrl }`. Los scopes son la MISMA constante que usa el OAuth, y GitLab respeta `GITLAB_URL`. `/api/auth/status` los expone.
+- **Tests:**
+  - `test/provider-token-help.test.js`: el OAuth pide los mismos scopes y los links son https y vienen prellenados.
+  - `e2e/connections.spec.js`, 5 tests, simulan `/api/auth/*` sin red: estado, ayuda, ojo, error persistente, conectado y OAuth. Con el código anterior fallan los 5.
+- **Verificación visual:** los 4 estados en los dos temas.
+
+### B-27 `[ ]` 🟡 Con ningún repo abierto, el arranque pisa la vista que el usuario ya eligió
+- **Repro (visto al capturar Connections):** sin repo abierto, hacer clic en otra vista apenas carga la página. Cuando termina la carga, `app.js` ejecuta `switchView('explorer')` y lo lleva a Explorer.
+- **Propuesta:** ir a Explorer solo si el usuario no cambió de vista mientras cargaba.
 ### R2-7 `[ ]` 🟡 Explorer: recientes por nombre, un solo primario, clonar por URL, "Showing N of M"
 
 ### B-25 `[?]` 🟡 "Initial commit" aparece dos veces en el historial
